@@ -1,0 +1,249 @@
+{
+    "swagger": "2.0",
+    "info": {
+        "description": "Portfolio tracking API",
+        "title": "My Portfolio API",
+        "contact": {},
+        "version": "1.0"
+    },
+    "host": "localhost:8080",
+    "basePath": "/",
+    "paths": {
+        "/accounts": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "accounts"
+                ],
+                "summary": "List accounts with pagination",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Page number (default 1)",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Items per page (default 20, max 100)",
+                        "name": "page_size",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handlers.paginatedAccounts"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            },
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "accounts"
+                ],
+                "summary": "Create a new account",
+                "parameters": [
+                    {
+                        "description": "Account payload",
+                        "name": "account",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handlers.createAccountRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_eriksalino_my-portfolio_api_internal_models.Account"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "definitions": {
+        "github_com_eriksalino_my-portfolio_api_internal_models.Account": {
+            "type": "object",
+            "properties": {
+                "account_name": {
+                    "type": "string"
+                },
+                "account_type": {
+                    "type": "string"
+                },
+                "assets": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_eriksalino_my-portfolio_api_internal_models.Asset"
+                    }
+                },
+                "balance": {
+                    "type": "number"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_eriksalino_my-portfolio_api_internal_models.Asset": {
+            "type": "object",
+            "properties": {
+                "accountID": {
+                    "type": "string"
+                },
+                "accountName": {
+                    "type": "string"
+                },
+                "averageCostBasis": {
+                    "type": "number",
+                    "format": "float64"
+                },
+                "costBasisTotal": {
+                    "type": "number",
+                    "format": "float64"
+                },
+                "createdAt": {
+                    "type": "string"
+                },
+                "currentValue": {
+                    "type": "number",
+                    "format": "float64"
+                },
+                "deletedAt": {
+                    "$ref": "#/definitions/gorm.DeletedAt"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "investmentType": {
+                    "type": "string"
+                },
+                "lastPrice": {
+                    "type": "number",
+                    "format": "float64"
+                },
+                "percentOfAccount": {
+                    "type": "number",
+                    "format": "float64"
+                },
+                "quantity": {
+                    "type": "number",
+                    "format": "float64"
+                },
+                "symbol": {
+                    "type": "string"
+                },
+                "totalGainLossDollar": {
+                    "type": "number",
+                    "format": "float64"
+                },
+                "totalGainLossPercent": {
+                    "type": "number",
+                    "format": "float64"
+                },
+                "updatedAt": {
+                    "type": "string"
+                }
+            }
+        },
+        "gorm.DeletedAt": {
+            "type": "object",
+            "properties": {
+                "time": {
+                    "type": "string"
+                },
+                "valid": {
+                    "description": "Valid is true if Time is not NULL",
+                    "type": "boolean"
+                }
+            }
+        },
+        "internal_handlers.createAccountRequest": {
+            "type": "object",
+            "required": [
+                "account_name",
+                "account_type"
+            ],
+            "properties": {
+                "account_name": {
+                    "type": "string"
+                },
+                "account_type": {
+                    "type": "string"
+                },
+                "balance": {
+                    "type": "number"
+                }
+            }
+        },
+        "internal_handlers.paginatedAccounts": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_eriksalino_my-portfolio_api_internal_models.Account"
+                    }
+                },
+                "page": {
+                    "type": "integer"
+                },
+                "page_size": {
+                    "type": "integer"
+                },
+                "total": {
+                    "type": "integer"
+                }
+            }
+        }
+    }
+}

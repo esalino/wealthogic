@@ -1,0 +1,166 @@
+basePath: /
+definitions:
+  github_com_eriksalino_my-portfolio_api_internal_models.Account:
+    properties:
+      account_name:
+        type: string
+      account_type:
+        type: string
+      assets:
+        items:
+          $ref: '#/definitions/github_com_eriksalino_my-portfolio_api_internal_models.Asset'
+        type: array
+      balance:
+        type: number
+      created_at:
+        type: string
+      id:
+        type: string
+      updated_at:
+        type: string
+    type: object
+  github_com_eriksalino_my-portfolio_api_internal_models.Asset:
+    properties:
+      accountID:
+        type: string
+      accountName:
+        type: string
+      averageCostBasis:
+        format: float64
+        type: number
+      costBasisTotal:
+        format: float64
+        type: number
+      createdAt:
+        type: string
+      currentValue:
+        format: float64
+        type: number
+      deletedAt:
+        $ref: '#/definitions/gorm.DeletedAt'
+      description:
+        type: string
+      id:
+        type: string
+      investmentType:
+        type: string
+      lastPrice:
+        format: float64
+        type: number
+      percentOfAccount:
+        format: float64
+        type: number
+      quantity:
+        format: float64
+        type: number
+      symbol:
+        type: string
+      totalGainLossDollar:
+        format: float64
+        type: number
+      totalGainLossPercent:
+        format: float64
+        type: number
+      updatedAt:
+        type: string
+    type: object
+  gorm.DeletedAt:
+    properties:
+      time:
+        type: string
+      valid:
+        description: Valid is true if Time is not NULL
+        type: boolean
+    type: object
+  internal_handlers.createAccountRequest:
+    properties:
+      account_name:
+        type: string
+      account_type:
+        type: string
+      balance:
+        type: number
+    required:
+    - account_name
+    - account_type
+    type: object
+  internal_handlers.paginatedAccounts:
+    properties:
+      data:
+        items:
+          $ref: '#/definitions/github_com_eriksalino_my-portfolio_api_internal_models.Account'
+        type: array
+      page:
+        type: integer
+      page_size:
+        type: integer
+      total:
+        type: integer
+    type: object
+host: localhost:8080
+info:
+  contact: {}
+  description: Portfolio tracking API
+  title: My Portfolio API
+  version: "1.0"
+paths:
+  /accounts:
+    get:
+      parameters:
+      - description: Page number (default 1)
+        in: query
+        name: page
+        type: integer
+      - description: Items per page (default 20, max 100)
+        in: query
+        name: page_size
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_handlers.paginatedAccounts'
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: List accounts with pagination
+      tags:
+      - accounts
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Account payload
+        in: body
+        name: account
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handlers.createAccountRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/github_com_eriksalino_my-portfolio_api_internal_models.Account'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Create a new account
+      tags:
+      - accounts
+swagger: "2.0"

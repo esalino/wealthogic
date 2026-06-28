@@ -1,0 +1,10 @@
+{
+  "name": "api",
+  "scripts": {
+    "build": "go build -o bin/api ./cmd/api",
+    "dev": "go run ./cmd/api",
+    "lint": "go vet ./...",
+    "swagger": "$(go env GOPATH)/bin/swag init -g ./cmd/api/main.go --parseDependency"
+  },
+  "private": true
+}
