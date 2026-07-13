@@ -6,71 +6,70 @@ definitions:
         type: string
       account_type:
         type: string
-      assets:
-        items:
-          $ref: '#/definitions/github_com_eriksalino_my-portfolio_api_internal_models.Asset'
-        type: array
       balance:
         type: number
       created_at:
         type: string
+      holdings:
+        items:
+          $ref: '#/definitions/github_com_eriksalino_my-portfolio_api_internal_models.Holding'
+        type: array
       id:
+        type: string
+      owners:
+        items:
+          $ref: '#/definitions/github_com_eriksalino_my-portfolio_api_internal_models.User'
+        type: array
+      tax_type:
         type: string
       updated_at:
         type: string
     type: object
-  github_com_eriksalino_my-portfolio_api_internal_models.Asset:
+  github_com_eriksalino_my-portfolio_api_internal_models.Holding:
     properties:
-      accountID:
+      account_id:
         type: string
-      accountName:
+      account_name:
         type: string
-      averageCostBasis:
-        format: float64
+      cost_basis_average:
         type: number
-      costBasisTotal:
-        format: float64
+      cost_basis_total:
         type: number
-      createdAt:
+      created_at:
         type: string
-      currentValue:
-        format: float64
+      current_value:
         type: number
-      deletedAt:
-        $ref: '#/definitions/gorm.DeletedAt'
       description:
         type: string
       id:
         type: string
-      investmentType:
+      investment_type:
         type: string
-      lastPrice:
-        format: float64
-        type: number
-      percentOfAccount:
-        format: float64
+      last_price:
         type: number
       quantity:
-        format: float64
         type: number
       symbol:
         type: string
-      totalGainLossDollar:
-        format: float64
+      total_gain_loss_dollar:
         type: number
-      totalGainLossPercent:
-        format: float64
+      total_gain_loss_percent:
         type: number
-      updatedAt:
+      updated_at:
         type: string
     type: object
-  gorm.DeletedAt:
+  github_com_eriksalino_my-portfolio_api_internal_models.User:
     properties:
-      time:
+      created_at:
         type: string
-      valid:
-        description: Valid is true if Time is not NULL
-        type: boolean
+      first_name:
+        type: string
+      id:
+        type: string
+      last_name:
+        type: string
+      updated_at:
+        type: string
     type: object
   internal_handlers.createAccountRequest:
     properties:
@@ -80,6 +79,12 @@ definitions:
         type: string
       balance:
         type: number
+      owner_ids:
+        items:
+          type: string
+        type: array
+      tax_type:
+        type: string
     required:
     - account_name
     - account_type

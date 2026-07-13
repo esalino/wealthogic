@@ -14,6 +14,8 @@ type Account struct {
 	DeletedAt   gorm.DeletedAt `gorm:"index"                                           json:"-"`
 	AccountName string         `gorm:"not null"                                        json:"account_name"`
 	AccountType string         `gorm:"not null"                                        json:"account_type"`
+	TaxType     string         `gorm:"not null"                                        json:"tax_type"`
 	Balance     float64        `json:"balance"`
-	Assets      []Asset        `json:"assets,omitempty"`
+	Holdings    []Holding      `json:"holdings,omitempty"`
+	Owners      []User         `gorm:"many2many:account_owners;"                       json:"owners,omitempty"`
 }

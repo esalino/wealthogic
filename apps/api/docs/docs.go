@@ -117,19 +117,28 @@ const docTemplate = `{
                 "account_type": {
                     "type": "string"
                 },
-                "assets": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/github_com_eriksalino_my-portfolio_api_internal_models.Asset"
-                    }
-                },
                 "balance": {
                     "type": "number"
                 },
                 "created_at": {
                     "type": "string"
                 },
+                "holdings": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_eriksalino_my-portfolio_api_internal_models.Holding"
+                    }
+                },
                 "id": {
+                    "type": "string"
+                },
+                "owners": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_eriksalino_my-portfolio_api_internal_models.User"
+                    }
+                },
+                "tax_type": {
                     "type": "string"
                 },
                 "updated_at": {
@@ -137,32 +146,26 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_eriksalino_my-portfolio_api_internal_models.Asset": {
+        "github_com_eriksalino_my-portfolio_api_internal_models.Holding": {
             "type": "object",
             "properties": {
-                "accountID": {
+                "account_id": {
                     "type": "string"
                 },
-                "accountName": {
+                "account_name": {
                     "type": "string"
                 },
-                "averageCostBasis": {
-                    "type": "number",
-                    "format": "float64"
+                "cost_basis_average": {
+                    "type": "number"
                 },
-                "costBasisTotal": {
-                    "type": "number",
-                    "format": "float64"
+                "cost_basis_total": {
+                    "type": "number"
                 },
-                "createdAt": {
+                "created_at": {
                     "type": "string"
                 },
-                "currentValue": {
-                    "type": "number",
-                    "format": "float64"
-                },
-                "deletedAt": {
-                    "$ref": "#/definitions/gorm.DeletedAt"
+                "current_value": {
+                    "type": "number"
                 },
                 "description": {
                     "type": "string"
@@ -170,46 +173,46 @@ const docTemplate = `{
                 "id": {
                     "type": "string"
                 },
-                "investmentType": {
+                "investment_type": {
                     "type": "string"
                 },
-                "lastPrice": {
-                    "type": "number",
-                    "format": "float64"
-                },
-                "percentOfAccount": {
-                    "type": "number",
-                    "format": "float64"
+                "last_price": {
+                    "type": "number"
                 },
                 "quantity": {
-                    "type": "number",
-                    "format": "float64"
+                    "type": "number"
                 },
                 "symbol": {
                     "type": "string"
                 },
-                "totalGainLossDollar": {
-                    "type": "number",
-                    "format": "float64"
+                "total_gain_loss_dollar": {
+                    "type": "number"
                 },
-                "totalGainLossPercent": {
-                    "type": "number",
-                    "format": "float64"
+                "total_gain_loss_percent": {
+                    "type": "number"
                 },
-                "updatedAt": {
+                "updated_at": {
                     "type": "string"
                 }
             }
         },
-        "gorm.DeletedAt": {
+        "github_com_eriksalino_my-portfolio_api_internal_models.User": {
             "type": "object",
             "properties": {
-                "time": {
+                "created_at": {
                     "type": "string"
                 },
-                "valid": {
-                    "description": "Valid is true if Time is not NULL",
-                    "type": "boolean"
+                "first_name": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "last_name": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
                 }
             }
         },
@@ -228,6 +231,15 @@ const docTemplate = `{
                 },
                 "balance": {
                     "type": "number"
+                },
+                "owner_ids": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "tax_type": {
+                    "type": "string"
                 }
             }
         },

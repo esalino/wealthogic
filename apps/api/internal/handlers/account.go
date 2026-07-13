@@ -6,12 +6,14 @@ import (
 
 	"github.com/eriksalino/my-portfolio/api/internal/models"
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
 
 type AccountHandler interface {
 	CreateAccount(c *gin.Context)
 	GetAccounts(c *gin.Context)
+	UpdateAccount(c *gin.Context)
 }
 
 type accountHandler struct {
@@ -23,9 +25,11 @@ func NewAccountHandler(db *gorm.DB) AccountHandler {
 }
 
 type createAccountRequest struct {
-	AccountName string  `json:"account_name" binding:"required"`
-	AccountType string  `json:"account_type" binding:"required"`
-	Balance     float64 `json:"balance"`
+	AccountName string      `json:"account_name" binding:"required"`
+	AccountType string      `json:"account_type" binding:"required"`
+	TaxType     string      `json:"tax_type"`
+	Balance     float64     `json:"balance"`
+	OwnerIDs    []uuid.UUID `json:"owner_ids"`
 }
 
 type paginatedAccounts struct {
@@ -55,12 +59,26 @@ func (h *accountHandler) CreateAccount(c *gin.Context) {
 	account := models.Account{
 		AccountName: req.AccountName,
 		AccountType: req.AccountType,
+		TaxType:     req.TaxType,
 		Balance:     req.Balance,
 	}
 
 	if err := h.db.Create(&account).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create account"})
 		return
+	}
+
+	if len(req.OwnerIDs) > 0 {
+		var owners []models.User
+		if err := h.db.Where("id IN ?", req.OwnerIDs).Find(&owners).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch owners"})
+			return
+		}
+		if err := h.db.Model(&account).Association("Owners").Replace(owners); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to assign owners"})
+			return
+		}
+		account.Owners = owners
 	}
 
 	c.JSON(http.StatusCreated, account)
@@ -94,7 +112,7 @@ func (h *accountHandler) GetAccounts(c *gin.Context) {
 
 	var accounts []models.Account
 	offset := (page - 1) * pageSize
-	if err := h.db.Offset(offset).Limit(pageSize).Find(&accounts).Error; err != nil {
+	if err := h.db.Preload("Owners").Offset(offset).Limit(pageSize).Find(&accounts).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch accounts"})
 		return
 	}
@@ -105,4 +123,59 @@ func (h *accountHandler) GetAccounts(c *gin.Context) {
 		Page:     page,
 		PageSize: pageSize,
 	})
+}
+
+type updateAccountRequest struct {
+	AccountName string      `json:"account_name"`
+	AccountType string      `json:"account_type"`
+	TaxType     string      `json:"tax_type"`
+	Balance     float64     `json:"balance"`
+	OwnerIDs    []uuid.UUID `json:"owner_ids"`
+}
+
+func (h *accountHandler) UpdateAccount(c *gin.Context) {
+	id := c.Param("id")
+
+	var account models.Account
+	if err := h.db.First(&account, "id = ?", id).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "account not found"})
+		return
+	}
+
+	var req updateAccountRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if req.AccountName != "" {
+		account.AccountName = req.AccountName
+	}
+	if req.AccountType != "" {
+		account.AccountType = req.AccountType
+	}
+	if req.TaxType != "" {
+		account.TaxType = req.TaxType
+	}
+	account.Balance = req.Balance
+
+	if err := h.db.Save(&account).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update account"})
+		return
+	}
+
+	var owners []models.User
+	if len(req.OwnerIDs) > 0 {
+		if err := h.db.Where("id IN ?", req.OwnerIDs).Find(&owners).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch owners"})
+			return
+		}
+	}
+	if err := h.db.Model(&account).Association("Owners").Replace(owners); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update owners"})
+		return
+	}
+	account.Owners = owners
+
+	c.JSON(http.StatusOK, account)
 }
