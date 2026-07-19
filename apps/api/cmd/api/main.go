@@ -10,9 +10,9 @@ import (
 	"net/http"
 	"os"
 
-	_ "github.com/eriksalino/my-portfolio/api/docs"
-	"github.com/eriksalino/my-portfolio/api/internal/db"
-	"github.com/eriksalino/my-portfolio/api/internal/handlers"
+	_ "github.com/eriksalino/wealthogic/api/docs"
+	"github.com/eriksalino/wealthogic/api/internal/db"
+	"github.com/eriksalino/wealthogic/api/internal/handlers"
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"

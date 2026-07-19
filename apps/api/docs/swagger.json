@@ -76,7 +76,7 @@
                     "201": {
                         "description": "Created",
                         "schema": {
-                            "$ref": "#/definitions/github_com_eriksalino_my-portfolio_api_internal_models.Account"
+                            "$ref": "#/definitions/github_com_eriksalino_wealthogic_api_internal_models.Account"
                         }
                     },
                     "400": {
@@ -102,7 +102,7 @@
         }
     },
     "definitions": {
-        "github_com_eriksalino_my-portfolio_api_internal_models.Account": {
+        "github_com_eriksalino_wealthogic_api_internal_models.Account": {
             "type": "object",
             "properties": {
                 "account_name": {
@@ -117,19 +117,19 @@
                 "created_at": {
                     "type": "string"
                 },
-                "holdings": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/github_com_eriksalino_my-portfolio_api_internal_models.Holding"
-                    }
-                },
                 "id": {
                     "type": "string"
                 },
                 "owners": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/github_com_eriksalino_my-portfolio_api_internal_models.User"
+                        "$ref": "#/definitions/github_com_eriksalino_wealthogic_api_internal_models.User"
+                    }
+                },
+                "positions": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_eriksalino_wealthogic_api_internal_models.Position"
                     }
                 },
                 "tax_type": {
@@ -140,26 +140,17 @@
                 }
             }
         },
-        "github_com_eriksalino_my-portfolio_api_internal_models.Holding": {
+        "github_com_eriksalino_wealthogic_api_internal_models.Position": {
             "type": "object",
             "properties": {
                 "account_id": {
                     "type": "string"
                 },
-                "account_name": {
+                "asset_type": {
                     "type": "string"
-                },
-                "cost_basis_average": {
-                    "type": "number"
-                },
-                "cost_basis_total": {
-                    "type": "number"
                 },
                 "created_at": {
                     "type": "string"
-                },
-                "current_value": {
-                    "type": "number"
                 },
                 "description": {
                     "type": "string"
@@ -167,30 +158,80 @@
                 "id": {
                     "type": "string"
                 },
-                "investment_type": {
+                "purchase_date": {
                     "type": "string"
                 },
-                "last_price": {
+                "purchase_price": {
                     "type": "number"
                 },
-                "quantity": {
+                "purchase_quantity": {
+                    "type": "number"
+                },
+                "remaining_quantity": {
                     "type": "number"
                 },
                 "symbol": {
                     "type": "string"
                 },
-                "total_gain_loss_dollar": {
-                    "type": "number"
-                },
-                "total_gain_loss_percent": {
-                    "type": "number"
+                "transactions": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_eriksalino_wealthogic_api_internal_models.Transaction"
+                    }
                 },
                 "updated_at": {
                     "type": "string"
                 }
             }
         },
-        "github_com_eriksalino_my-portfolio_api_internal_models.User": {
+        "github_com_eriksalino_wealthogic_api_internal_models.Transaction": {
+            "type": "object",
+            "properties": {
+                "account_id": {
+                    "type": "string"
+                },
+                "asset_description": {
+                    "type": "string"
+                },
+                "asset_type": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "position_id": {
+                    "type": "string"
+                },
+                "realized_gains": {
+                    "type": "number"
+                },
+                "symbol": {
+                    "type": "string"
+                },
+                "transaction_date": {
+                    "type": "string"
+                },
+                "transaction_description": {
+                    "type": "string"
+                },
+                "transaction_price": {
+                    "type": "number"
+                },
+                "transaction_quantity": {
+                    "type": "number"
+                },
+                "transaction_type": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_eriksalino_wealthogic_api_internal_models.User": {
             "type": "object",
             "properties": {
                 "created_at": {
@@ -243,7 +284,7 @@
                 "data": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/github_com_eriksalino_my-portfolio_api_internal_models.Account"
+                        "$ref": "#/definitions/github_com_eriksalino_wealthogic_api_internal_models.Account"
                     }
                 },
                 "page": {

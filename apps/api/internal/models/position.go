@@ -7,8 +7,7 @@ import (
 	"gorm.io/gorm"
 )
 
-// Holding represents a single holding. A holding can be made up of multiple child positions.
-type Holding struct {
+type Position struct {
 	ID        uuid.UUID      `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
 	CreatedAt time.Time      `json:"created_at"`
 	UpdatedAt time.Time      `json:"updated_at"`
@@ -18,8 +17,11 @@ type Holding struct {
 	Symbol      string `json:"symbol"`
 	Description string `gorm:"not null"  json:"description"`
 
-	LastPrice float64 `json:"last_price"`
+	PurchaseDate      time.Time `gorm:"not null"  json:"purchase_date"`
+	PurchaseQuantity  float64   `gorm:"not null"  json:"purchase_quantity"`
+	PurchasePrice     float64   `gorm:"not null"  json:"purchase_price"`
+	RemainingQuantity float64   `json:"remaining_quantity"`
 
-	AccountID uuid.UUID  `gorm:"type:uuid" json:"account_id"`
-	Positions []Position `json:"positions,omitempty"`
+	HoldingID    uuid.UUID     `gorm:"type:uuid" json:"holding_id"`
+	Transactions []Transaction `json:"transactions,omitempty"`
 }

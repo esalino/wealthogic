@@ -3,7 +3,7 @@ package handlers
 import (
 	"net/http"
 
-	"github.com/eriksalino/my-portfolio/api/internal/models"
+	"github.com/eriksalino/wealthogic/api/internal/models"
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 )

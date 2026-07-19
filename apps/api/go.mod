@@ -1,4 +1,4 @@
-module github.com/eriksalino/my-portfolio/api
+module github.com/eriksalino/wealthogic/api
 
 go 1.25.1
 

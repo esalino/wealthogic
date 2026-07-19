@@ -16,6 +16,7 @@ type Account struct {
 	AccountType string         `gorm:"not null"                                        json:"account_type"`
 	TaxType     string         `gorm:"not null"                                        json:"tax_type"`
 	Balance     float64        `json:"balance"`
-	Holdings    []Holding      `json:"holdings,omitempty"`
-	Owners      []User         `gorm:"many2many:account_owners;"                       json:"owners,omitempty"`
+
+	Holdings []Holding `json:"holdings,omitempty"`
+	Owners   []User    `gorm:"many2many:account_owners;"                       json:"owners,omitempty"`
 }

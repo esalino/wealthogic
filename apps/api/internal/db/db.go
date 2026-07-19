@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/eriksalino/my-portfolio/api/internal/models"
+	"github.com/eriksalino/wealthogic/api/internal/models"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
@@ -28,7 +28,7 @@ func Connect() (*gorm.DB, error) {
 		return nil, err
 	}
 
-	if err := db.AutoMigrate(&models.User{}, &models.Account{}, &models.Holding{}, &models.Lot{}); err != nil {
+	if err := db.AutoMigrate(&models.User{}, &models.Account{}, &models.Holding{}, &models.Position{}, &models.Transaction{}); err != nil {
 		return nil, err
 	}
 
