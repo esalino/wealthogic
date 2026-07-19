@@ -22,6 +22,7 @@ type Position struct {
 	PurchasePrice     float64   `gorm:"not null"  json:"purchase_price"`
 	RemainingQuantity float64   `json:"remaining_quantity"`
 
+	AccountID    uuid.UUID     `gorm:"type:uuid" json:"account_id"`
 	HoldingID    uuid.UUID     `gorm:"type:uuid" json:"holding_id"`
 	Transactions []Transaction `json:"transactions,omitempty"`
 }

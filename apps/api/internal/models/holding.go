@@ -20,6 +20,5 @@ type Holding struct {
 
 	LastPrice float64 `json:"last_price"`
 
-	AccountID uuid.UUID  `gorm:"type:uuid" json:"account_id"`
 	Positions []Position `json:"positions,omitempty"`
 }

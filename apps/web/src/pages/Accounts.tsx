@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import {
   createColumnHelper,
   flexRender,
@@ -275,28 +276,53 @@ function EditAccountModal({ account, onClose }: EditAccountModalProps) {
 
 function RowMenu({ onEdit }: { onEdit: () => void }) {
   const [open, setOpen] = useState(false)
-  const ref = useRef<HTMLDivElement>(null)
+  const [pos, setPos] = useState({ top: 0, right: 0 })
+  const btnRef = useRef<HTMLButtonElement>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     if (!open) return
     function handler(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+      if (btnRef.current?.contains(e.target as Node)) return
+      if (menuRef.current?.contains(e.target as Node)) return
+      setOpen(false)
     }
+    // The menu is fixed-positioned, so close it if the page scrolls or resizes
+    function close() { setOpen(false) }
     document.addEventListener('mousedown', handler)
-    return () => document.removeEventListener('mousedown', handler)
+    window.addEventListener('scroll', close, true)
+    window.addEventListener('resize', close)
+    return () => {
+      document.removeEventListener('mousedown', handler)
+      window.removeEventListener('scroll', close, true)
+      window.removeEventListener('resize', close)
+    }
   }, [open])
 
+  function toggle() {
+    if (!open && btnRef.current) {
+      const rect = btnRef.current.getBoundingClientRect()
+      setPos({ top: rect.bottom + 4, right: window.innerWidth - rect.right })
+    }
+    setOpen((v) => !v)
+  }
+
   return (
-    <div ref={ref} className="relative flex justify-end">
+    <div className="relative flex justify-end">
       <button
-        onClick={() => setOpen((v) => !v)}
+        ref={btnRef}
+        onClick={toggle}
         className="w-8 h-8 flex items-center justify-center rounded-lg text-on-surface-variant hover:bg-surface-container-high transition-colors"
       >
         <span className="material-symbols-outlined text-xl">more_vert</span>
       </button>
 
-      {open && (
-        <div className="absolute right-0 top-9 z-20 w-36 bg-surface-container-lowest rounded-lg shadow-card border border-outline-variant py-1">
+      {open && createPortal(
+        <div
+          ref={menuRef}
+          style={{ top: pos.top, right: pos.right }}
+          className="fixed z-40 w-36 bg-surface-container-lowest rounded-lg shadow-card border border-outline-variant py-1"
+        >
           <button
             onClick={() => { setOpen(false); onEdit() }}
             className="w-full flex items-center gap-2 px-3 py-2 text-body-md text-on-surface hover:bg-surface-container-low transition-colors"
@@ -304,7 +330,8 @@ function RowMenu({ onEdit }: { onEdit: () => void }) {
             <span className="material-symbols-outlined text-base">edit</span>
             Edit
           </button>
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   )
