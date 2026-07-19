@@ -32,6 +32,7 @@ func main() {
 
 	accountHandler := handlers.NewAccountHandler(database)
 	userHandler := handlers.NewUserHandler(database)
+	uploadHandler := handlers.NewUploadHandler(database)
 
 	r := gin.Default()
 
@@ -54,6 +55,7 @@ func main() {
 	r.POST("/accounts", accountHandler.CreateAccount)
 	r.PATCH("/accounts/:id", accountHandler.UpdateAccount)
 	r.GET("/users", userHandler.GetUsers)
+	r.POST("/uploads", uploadHandler.Upload)
 
 	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
 

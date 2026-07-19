@@ -105,6 +105,70 @@ const docTemplate = `{
                     }
                 }
             }
+        },
+        "/uploads": {
+            "post": {
+                "description": "Routes the file to a handler selected by file_type + account_type (currently: holdings + fidelity)",
+                "consumes": [
+                    "multipart/form-data"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "uploads"
+                ],
+                "summary": "Upload a data file for import",
+                "parameters": [
+                    {
+                        "type": "file",
+                        "description": "File to import",
+                        "name": "file",
+                        "in": "formData",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Kind of data in the file (e.g. holdings)",
+                        "name": "file_type",
+                        "in": "formData",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Institution the file came from (e.g. fidelity)",
+                        "name": "account_type",
+                        "in": "formData",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_eriksalino_wealthogic_api_internal_uploads.Result"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
         }
     },
     "definitions": {
@@ -161,6 +225,9 @@ const docTemplate = `{
                 "description": {
                     "type": "string"
                 },
+                "holding_id": {
+                    "type": "string"
+                },
                 "id": {
                     "type": "string"
                 },
@@ -193,9 +260,6 @@ const docTemplate = `{
         "github_com_eriksalino_wealthogic_api_internal_models.Transaction": {
             "type": "object",
             "properties": {
-                "account_id": {
-                    "type": "string"
-                },
                 "asset_description": {
                     "type": "string"
                 },
@@ -254,6 +318,20 @@ const docTemplate = `{
                 },
                 "updated_at": {
                     "type": "string"
+                }
+            }
+        },
+        "github_com_eriksalino_wealthogic_api_internal_uploads.Result": {
+            "type": "object",
+            "properties": {
+                "created": {
+                    "type": "integer"
+                },
+                "skipped": {
+                    "type": "integer"
+                },
+                "updated": {
+                    "type": "integer"
                 }
             }
         },
