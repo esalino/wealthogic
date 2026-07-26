@@ -4,6 +4,7 @@ import (
 	"io"
 	"strings"
 
+	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
 
@@ -14,9 +15,15 @@ type Result struct {
 	Skipped int `json:"skipped"`
 }
 
+// Options carries request-level context a handler may need beyond the file
+// itself, e.g. which account transactions should be tied to.
+type Options struct {
+	AccountID uuid.UUID
+}
+
 // FileHandler processes an uploaded file into database records.
 type FileHandler interface {
-	Process(db *gorm.DB, file io.Reader) (*Result, error)
+	Process(db *gorm.DB, file io.Reader, opts Options) (*Result, error)
 }
 
 // Registry maps a (file type, account type) pair to the handler that knows how
@@ -28,6 +35,7 @@ type Registry struct {
 func NewRegistry() *Registry {
 	r := &Registry{handlers: map[string]FileHandler{}}
 	r.register("holdings", "fidelity", &fidelityHoldingsHandler{})
+	r.register("transactions", "fidelity", &fidelityTransactionsHandler{})
 	return r
 }
 

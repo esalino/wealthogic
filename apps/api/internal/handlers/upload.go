@@ -5,6 +5,7 @@ import (
 
 	"github.com/eriksalino/wealthogic/api/internal/uploads"
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
 
@@ -27,9 +28,10 @@ func NewUploadHandler(db *gorm.DB) UploadHandler {
 // @Tags         uploads
 // @Accept       multipart/form-data
 // @Produce      json
-// @Param        file          formData  file    true  "File to import"
-// @Param        file_type     formData  string  true  "Kind of data in the file (e.g. holdings)"
-// @Param        account_type  formData  string  true  "Institution the file came from (e.g. fidelity)"
+// @Param        file          formData  file    true   "File to import"
+// @Param        file_type     formData  string  true   "Kind of data in the file (e.g. holdings, transactions)"
+// @Param        account_type  formData  string  true   "Institution the file came from (e.g. fidelity)"
+// @Param        account_id    formData  string  false  "Account to tie the data to (required for transactions)"
 // @Success      200  {object}  uploads.Result
 // @Failure      400  {object}  map[string]string
 // @Failure      500  {object}  map[string]string
@@ -54,6 +56,16 @@ func (h *uploadHandler) Upload(c *gin.Context) {
 		return
 	}
 
+	var opts uploads.Options
+	if accountID := c.PostForm("account_id"); accountID != "" {
+		id, err := uuid.Parse(accountID)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "account_id must be a valid uuid"})
+			return
+		}
+		opts.AccountID = id
+	}
+
 	fileHeader, err := c.FormFile("file")
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "file is required"})
@@ -67,7 +79,7 @@ func (h *uploadHandler) Upload(c *gin.Context) {
 	}
 	defer file.Close()
 
-	result, err := fileHandler.Process(h.db, file)
+	result, err := fileHandler.Process(h.db, file, opts)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return

@@ -13,17 +13,22 @@ type Transaction struct {
 	UpdatedAt time.Time      `json:"updated_at"`
 	DeletedAt gorm.DeletedAt `gorm:"index"                                          json:"-"`
 
-	PositionID uuid.UUID `gorm:"type:uuid" json:"position_id"`
+	AccountID uuid.UUID `gorm:"type:uuid" json:"account_id"`
 
-	AssetType        string `gorm:"not null"  json:"asset_type"`
-	Symbol           string `json:"symbol"`
-	AssetDescription string `gorm:"not null"  json:"asset_description"`
+	AssetType        *string `json:"asset_type"`
+	Symbol           string  `json:"symbol"`
+	AssetDescription *string `json:"asset_description"`
 
-	TransactionType        string    `gorm:"not null"  json:"transaction_type"`
-	TransactionDescription string    `gorm:"not null"  json:"transaction_description"`
-	TransactionDate        time.Time `gorm:"not null"  json:"transaction_date"`
-	TransactionQuantity    float64   `gorm:"not null"  json:"transaction_quantity"`
-	TransactionPrice       float64   `gorm:"not null"  json:"transaction_price"`
+	Action   string    `gorm:"not null"        json:"action"`
+	Date     time.Time `gorm:"not null;type:date" json:"date"`
+	Quantity *float64  `json:"quantity"`
+	Price    *float64  `json:"price"`
+	Amount   float64   `gorm:"not null"        json:"amount"`
+
+	Commission float64 `json:"commission"`
+	Fees       float64 `json:"fees"`
+
+	SettlementDate *time.Time `gorm:"type:date" json:"settlement_date"`
 
 	RealizedGains float64 `json:"realized_gains"`
 }

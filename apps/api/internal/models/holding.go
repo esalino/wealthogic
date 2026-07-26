@@ -20,5 +20,8 @@ type Holding struct {
 
 	LastPrice float64 `json:"last_price"`
 
+	Quantity     float64 `gorm:"not null;default:0"  json:"purchase_quantity"`
+	CurrentValue float64 `json:"current_value"`
+
 	Positions []Position `json:"positions,omitempty"`
 }

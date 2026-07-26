@@ -16,38 +16,7 @@ definitions:
         items:
           $ref: '#/definitions/github_com_eriksalino_wealthogic_api_internal_models.User'
         type: array
-      positions:
-        items:
-          $ref: '#/definitions/github_com_eriksalino_wealthogic_api_internal_models.Position'
-        type: array
       tax_type:
-        type: string
-      updated_at:
-        type: string
-    type: object
-  github_com_eriksalino_wealthogic_api_internal_models.Position:
-    properties:
-      account_id:
-        type: string
-      asset_type:
-        type: string
-      created_at:
-        type: string
-      description:
-        type: string
-      holding_id:
-        type: string
-      id:
-        type: string
-      purchase_date:
-        type: string
-      purchase_price:
-        type: number
-      purchase_quantity:
-        type: number
-      remaining_quantity:
-        type: number
-      symbol:
         type: string
       transactions:
         items:
@@ -58,29 +27,35 @@ definitions:
     type: object
   github_com_eriksalino_wealthogic_api_internal_models.Transaction:
     properties:
+      account_id:
+        type: string
+      action:
+        type: string
+      amount:
+        type: number
       asset_description:
         type: string
       asset_type:
         type: string
+      commission:
+        type: number
       created_at:
         type: string
+      date:
+        type: string
+      fees:
+        type: number
       id:
         type: string
-      position_id:
-        type: string
+      price:
+        type: number
+      quantity:
+        type: number
       realized_gains:
         type: number
+      settlement_date:
+        type: string
       symbol:
-        type: string
-      transaction_date:
-        type: string
-      transaction_description:
-        type: string
-      transaction_price:
-        type: number
-      transaction_quantity:
-        type: number
-      transaction_type:
         type: string
       updated_at:
         type: string
@@ -216,7 +191,7 @@ paths:
         name: file
         required: true
         type: file
-      - description: Kind of data in the file (e.g. holdings)
+      - description: Kind of data in the file (e.g. holdings, transactions)
         in: formData
         name: file_type
         required: true
@@ -225,6 +200,10 @@ paths:
         in: formData
         name: account_type
         required: true
+        type: string
+      - description: Account to tie the data to (required for transactions)
+        in: formData
+        name: account_id
         type: string
       produces:
       - application/json

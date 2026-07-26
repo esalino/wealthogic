@@ -129,7 +129,7 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "Kind of data in the file (e.g. holdings)",
+                        "description": "Kind of data in the file (e.g. holdings, transactions)",
                         "name": "file_type",
                         "in": "formData",
                         "required": true
@@ -140,6 +140,12 @@ const docTemplate = `{
                         "name": "account_type",
                         "in": "formData",
                         "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Account to tie the data to (required for transactions)",
+                        "name": "account_id",
+                        "in": "formData"
                     }
                 ],
                 "responses": {
@@ -196,54 +202,7 @@ const docTemplate = `{
                         "$ref": "#/definitions/github_com_eriksalino_wealthogic_api_internal_models.User"
                     }
                 },
-                "positions": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/github_com_eriksalino_wealthogic_api_internal_models.Position"
-                    }
-                },
                 "tax_type": {
-                    "type": "string"
-                },
-                "updated_at": {
-                    "type": "string"
-                }
-            }
-        },
-        "github_com_eriksalino_wealthogic_api_internal_models.Position": {
-            "type": "object",
-            "properties": {
-                "account_id": {
-                    "type": "string"
-                },
-                "asset_type": {
-                    "type": "string"
-                },
-                "created_at": {
-                    "type": "string"
-                },
-                "description": {
-                    "type": "string"
-                },
-                "holding_id": {
-                    "type": "string"
-                },
-                "id": {
-                    "type": "string"
-                },
-                "purchase_date": {
-                    "type": "string"
-                },
-                "purchase_price": {
-                    "type": "number"
-                },
-                "purchase_quantity": {
-                    "type": "number"
-                },
-                "remaining_quantity": {
-                    "type": "number"
-                },
-                "symbol": {
                     "type": "string"
                 },
                 "transactions": {
@@ -260,40 +219,49 @@ const docTemplate = `{
         "github_com_eriksalino_wealthogic_api_internal_models.Transaction": {
             "type": "object",
             "properties": {
+                "account_id": {
+                    "type": "string"
+                },
+                "action": {
+                    "type": "string"
+                },
+                "amount": {
+                    "type": "number"
+                },
                 "asset_description": {
                     "type": "string"
                 },
                 "asset_type": {
                     "type": "string"
                 },
+                "commission": {
+                    "type": "number"
+                },
                 "created_at": {
                     "type": "string"
+                },
+                "date": {
+                    "type": "string"
+                },
+                "fees": {
+                    "type": "number"
                 },
                 "id": {
                     "type": "string"
                 },
-                "position_id": {
-                    "type": "string"
+                "price": {
+                    "type": "number"
+                },
+                "quantity": {
+                    "type": "number"
                 },
                 "realized_gains": {
                     "type": "number"
                 },
+                "settlement_date": {
+                    "type": "string"
+                },
                 "symbol": {
-                    "type": "string"
-                },
-                "transaction_date": {
-                    "type": "string"
-                },
-                "transaction_description": {
-                    "type": "string"
-                },
-                "transaction_price": {
-                    "type": "number"
-                },
-                "transaction_quantity": {
-                    "type": "number"
-                },
-                "transaction_type": {
                     "type": "string"
                 },
                 "updated_at": {

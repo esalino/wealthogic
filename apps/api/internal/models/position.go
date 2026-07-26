@@ -13,16 +13,14 @@ type Position struct {
 	UpdatedAt time.Time      `json:"updated_at"`
 	DeletedAt gorm.DeletedAt `gorm:"index"                                          json:"-"`
 
-	AssetType   string `gorm:"not null"  json:"asset_type"`
-	Symbol      string `json:"symbol"`
-	Description string `gorm:"not null"  json:"description"`
+	AssetType        string `gorm:"not null"  json:"asset_type"`
+	Symbol           string `json:"symbol"`
+	AssetDescription string `gorm:"not null"  json:"asset_description"`
 
 	PurchaseDate      time.Time `gorm:"not null"  json:"purchase_date"`
 	PurchaseQuantity  float64   `gorm:"not null"  json:"purchase_quantity"`
 	PurchasePrice     float64   `gorm:"not null"  json:"purchase_price"`
 	RemainingQuantity float64   `json:"remaining_quantity"`
 
-	AccountID    uuid.UUID     `gorm:"type:uuid" json:"account_id"`
-	HoldingID    uuid.UUID     `gorm:"type:uuid" json:"holding_id"`
-	Transactions []Transaction `json:"transactions,omitempty"`
+	HoldingID uuid.UUID `gorm:"type:uuid" json:"holding_id"`
 }
