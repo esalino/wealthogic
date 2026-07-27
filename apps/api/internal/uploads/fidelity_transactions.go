@@ -32,6 +32,9 @@ const fidelityDateLayout = "01/02/2006"
 
 // fidelityTransactionsHandler parses a Fidelity account history CSV and
 // creates one Transaction per row, tied to the account passed in Options.
+// Fidelity lists rows newest-first, but we want insertion order (and thus PK
+// order) to match chronological order, so rows are buffered and inserted in
+// reverse.
 // Positions are not touched yet - each upload just appends transactions, so
 // re-uploading the same file will duplicate rows until we add dedup logic.
 type fidelityTransactionsHandler struct{}
@@ -52,6 +55,7 @@ func (h *fidelityTransactionsHandler) Process(db *gorm.DB, file io.Reader, opts 
 	reader.FieldsPerRecord = -1
 
 	result := &Result{}
+	var transactions []models.Transaction
 	for {
 		record, err := reader.Read()
 		if errors.Is(err, io.EOF) {
@@ -92,7 +96,7 @@ func (h *fidelityTransactionsHandler) Process(db *gorm.DB, file io.Reader, opts 
 			assetDescription = &description
 		}
 
-		transaction := models.Transaction{
+		transactions = append(transactions, models.Transaction{
 			AccountID:        opts.AccountID,
 			AssetType:        assetType,
 			Symbol:           symbol,
@@ -105,12 +109,23 @@ func (h *fidelityTransactionsHandler) Process(db *gorm.DB, file io.Reader, opts 
 			Commission:       parseDollar(record[txnColCommission]),
 			Fees:             parseDollar(record[txnColFees]),
 			SettlementDate:   parseDatePtr(record[txnColSettlementDate]),
-		}
+		})
+	}
 
-		if err := db.Create(&transaction).Error; err != nil {
-			return nil, fmt.Errorf("failed to create transaction for %s on %s: %w", symbol, runDate, err)
+	// Fidelity lists newest first; insert oldest first so the auto-increment
+	// PK order matches chronological order. The whole batch is wrapped in a
+	// transaction so a bad row doesn't leave a partially imported file.
+	err := db.Transaction(func(tx *gorm.DB) error {
+		for i := len(transactions) - 1; i >= 0; i-- {
+			if err := tx.Create(&transactions[i]).Error; err != nil {
+				return fmt.Errorf("failed to create transaction for %s on %s: %w", transactions[i].Symbol, transactions[i].Date.Format(fidelityDateLayout), err)
+			}
+			result.Created++
 		}
-		result.Created++
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 
 	return result, nil

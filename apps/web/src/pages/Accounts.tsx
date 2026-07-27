@@ -18,6 +18,7 @@ interface OutletCtx {
 
 const ACCOUNT_TYPES = ['Brokerage', 'Savings', 'Checking', 'Credit Card', 'Crypto']
 const TAX_TYPES = ['Personal', 'IRA', 'Roth']
+const COST_BASIS_METHODS = ['FIFO', 'LIFO']
 
 // ── Shared form fields ────────────────────────────────────────────────────────
 
@@ -28,6 +29,8 @@ interface AccountFormFieldsProps {
   setAccountType: (v: string) => void
   taxType: string
   setTaxType: (v: string) => void
+  defaultCostBasis: string
+  setDefaultCostBasis: (v: string) => void
   balance: string
   setBalance: (v: string) => void
   ownerIds: string[]
@@ -39,6 +42,7 @@ function AccountFormFields({
   nickname, setNickname,
   accountType, setAccountType,
   taxType, setTaxType,
+  defaultCostBasis, setDefaultCostBasis,
   balance, setBalance,
   ownerIds, toggleOwner,
   users,
@@ -69,6 +73,13 @@ function AccountFormFields({
         <label className="block text-label-sm font-semibold text-on-surface mb-1.5">Tax Type</label>
         <select value={taxType} onChange={(e) => setTaxType(e.target.value)} className={inputCls}>
           {TAX_TYPES.map((t) => <option key={t}>{t}</option>)}
+        </select>
+      </div>
+
+      <div>
+        <label className="block text-label-sm font-semibold text-on-surface mb-1.5">Default Cost Basis</label>
+        <select value={defaultCostBasis} onChange={(e) => setDefaultCostBasis(e.target.value)} className={inputCls}>
+          {COST_BASIS_METHODS.map((m) => <option key={m}>{m}</option>)}
         </select>
       </div>
 
@@ -123,6 +134,7 @@ function AddAccountModal({ isOpen, onClose }: AddAccountModalProps) {
   const [nickname, setNickname] = useState('')
   const [accountType, setAccountType] = useState('Brokerage')
   const [taxType, setTaxType] = useState('Personal')
+  const [defaultCostBasis, setDefaultCostBasis] = useState('FIFO')
   const [balance, setBalance] = useState('')
   const [ownerIds, setOwnerIds] = useState<string[]>([])
 
@@ -133,6 +145,7 @@ function AddAccountModal({ isOpen, onClose }: AddAccountModalProps) {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['accounts'] })
       setNickname(''); setAccountType('Brokerage'); setTaxType('Personal')
+      setDefaultCostBasis('FIFO')
       setBalance(''); setOwnerIds([])
       reset(); onClose()
     },
@@ -163,6 +176,7 @@ function AddAccountModal({ isOpen, onClose }: AddAccountModalProps) {
           nickname={nickname} setNickname={setNickname}
           accountType={accountType} setAccountType={setAccountType}
           taxType={taxType} setTaxType={setTaxType}
+          defaultCostBasis={defaultCostBasis} setDefaultCostBasis={setDefaultCostBasis}
           balance={balance} setBalance={setBalance}
           ownerIds={ownerIds} toggleOwner={toggleOwner}
           users={users}
@@ -175,7 +189,7 @@ function AddAccountModal({ isOpen, onClose }: AddAccountModalProps) {
             Cancel
           </button>
           <button
-            onClick={() => mutate({ account_name: nickname, account_type: accountType, tax_type: taxType, balance: parseFloat(balance) || 0, owner_ids: ownerIds })}
+            onClick={() => mutate({ account_name: nickname, account_type: accountType, tax_type: taxType, default_cost_basis: defaultCostBasis, balance: parseFloat(balance) || 0, owner_ids: ownerIds })}
             disabled={isPending}
             className="flex-1 px-4 py-2.5 bg-primary text-on-primary rounded-lg text-body-md font-semibold hover:opacity-90 transition-opacity disabled:opacity-50"
           >
@@ -199,6 +213,7 @@ function EditAccountModal({ account, onClose }: EditAccountModalProps) {
   const [nickname, setNickname] = useState('')
   const [accountType, setAccountType] = useState('Brokerage')
   const [taxType, setTaxType] = useState('Personal')
+  const [defaultCostBasis, setDefaultCostBasis] = useState('FIFO')
   const [balance, setBalance] = useState('')
   const [ownerIds, setOwnerIds] = useState<string[]>([])
 
@@ -209,6 +224,7 @@ function EditAccountModal({ account, onClose }: EditAccountModalProps) {
       setNickname(account.account_name)
       setAccountType(account.account_type)
       setTaxType(account.tax_type ?? 'Personal')
+      setDefaultCostBasis(account.default_cost_basis ?? 'FIFO')
       setBalance(String(account.balance))
       setOwnerIds((account.owners ?? []).map((o) => o.id))
     }
@@ -248,6 +264,7 @@ function EditAccountModal({ account, onClose }: EditAccountModalProps) {
           nickname={nickname} setNickname={setNickname}
           accountType={accountType} setAccountType={setAccountType}
           taxType={taxType} setTaxType={setTaxType}
+          defaultCostBasis={defaultCostBasis} setDefaultCostBasis={setDefaultCostBasis}
           balance={balance} setBalance={setBalance}
           ownerIds={ownerIds} toggleOwner={toggleOwner}
           users={users}
@@ -260,7 +277,7 @@ function EditAccountModal({ account, onClose }: EditAccountModalProps) {
             Cancel
           </button>
           <button
-            onClick={() => mutate({ id: account.id, payload: { account_name: nickname, account_type: accountType, tax_type: taxType, balance: parseFloat(balance) || 0, owner_ids: ownerIds } })}
+            onClick={() => mutate({ id: account.id, payload: { account_name: nickname, account_type: accountType, tax_type: taxType, default_cost_basis: defaultCostBasis, balance: parseFloat(balance) || 0, owner_ids: ownerIds } })}
             disabled={isPending}
             className="flex-1 px-4 py-2.5 bg-primary text-on-primary rounded-lg text-body-md font-semibold hover:opacity-90 transition-opacity disabled:opacity-50"
           >

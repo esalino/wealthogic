@@ -4,6 +4,7 @@ export interface CreateAccountPayload {
   account_name: string
   account_type: string
   tax_type: string
+  default_cost_basis: string
   balance: number
   owner_ids: string[]
 }
@@ -13,6 +14,7 @@ export interface Account {
   account_name: string
   account_type: string
   tax_type: string
+  default_cost_basis: string
   balance: number
   created_at: string
   updated_at: string
@@ -42,6 +44,7 @@ export interface UpdateAccountPayload {
   account_name: string
   account_type: string
   tax_type: string
+  default_cost_basis: string
   balance: number
   owner_ids: string[]
 }

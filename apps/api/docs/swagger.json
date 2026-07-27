@@ -187,6 +187,9 @@
                 "created_at": {
                     "type": "string"
                 },
+                "default_cost_basis": {
+                    "type": "string"
+                },
                 "id": {
                     "type": "string"
                 },
@@ -241,7 +244,7 @@
                     "type": "number"
                 },
                 "id": {
-                    "type": "string"
+                    "type": "integer"
                 },
                 "price": {
                     "type": "number"
@@ -312,6 +315,9 @@
                 },
                 "balance": {
                     "type": "number"
+                },
+                "default_cost_basis": {
+                    "type": "string"
                 },
                 "owner_ids": {
                     "type": "array",

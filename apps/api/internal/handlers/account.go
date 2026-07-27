@@ -25,11 +25,12 @@ func NewAccountHandler(db *gorm.DB) AccountHandler {
 }
 
 type createAccountRequest struct {
-	AccountName string      `json:"account_name" binding:"required"`
-	AccountType string      `json:"account_type" binding:"required"`
-	TaxType     string      `json:"tax_type"`
-	Balance     float64     `json:"balance"`
-	OwnerIDs    []uuid.UUID `json:"owner_ids"`
+	AccountName      string      `json:"account_name" binding:"required"`
+	AccountType      string      `json:"account_type" binding:"required"`
+	TaxType          string      `json:"tax_type"`
+	DefaultCostBasis string      `json:"default_cost_basis"`
+	Balance          float64     `json:"balance"`
+	OwnerIDs         []uuid.UUID `json:"owner_ids"`
 }
 
 type paginatedAccounts struct {
@@ -56,11 +57,17 @@ func (h *accountHandler) CreateAccount(c *gin.Context) {
 		return
 	}
 
+	defaultCostBasis := req.DefaultCostBasis
+	if defaultCostBasis == "" {
+		defaultCostBasis = "FIFO"
+	}
+
 	account := models.Account{
-		AccountName: req.AccountName,
-		AccountType: req.AccountType,
-		TaxType:     req.TaxType,
-		Balance:     req.Balance,
+		AccountName:      req.AccountName,
+		AccountType:      req.AccountType,
+		TaxType:          req.TaxType,
+		DefaultCostBasis: defaultCostBasis,
+		Balance:          req.Balance,
 	}
 
 	if err := h.db.Create(&account).Error; err != nil {
@@ -126,11 +133,12 @@ func (h *accountHandler) GetAccounts(c *gin.Context) {
 }
 
 type updateAccountRequest struct {
-	AccountName string      `json:"account_name"`
-	AccountType string      `json:"account_type"`
-	TaxType     string      `json:"tax_type"`
-	Balance     float64     `json:"balance"`
-	OwnerIDs    []uuid.UUID `json:"owner_ids"`
+	AccountName      string      `json:"account_name"`
+	AccountType      string      `json:"account_type"`
+	TaxType          string      `json:"tax_type"`
+	DefaultCostBasis string      `json:"default_cost_basis"`
+	Balance          float64     `json:"balance"`
+	OwnerIDs         []uuid.UUID `json:"owner_ids"`
 }
 
 func (h *accountHandler) UpdateAccount(c *gin.Context) {
@@ -156,6 +164,9 @@ func (h *accountHandler) UpdateAccount(c *gin.Context) {
 	}
 	if req.TaxType != "" {
 		account.TaxType = req.TaxType
+	}
+	if req.DefaultCostBasis != "" {
+		account.DefaultCostBasis = req.DefaultCostBasis
 	}
 	account.Balance = req.Balance
 

@@ -193,6 +193,9 @@ const docTemplate = `{
                 "created_at": {
                     "type": "string"
                 },
+                "default_cost_basis": {
+                    "type": "string"
+                },
                 "id": {
                     "type": "string"
                 },
@@ -247,7 +250,7 @@ const docTemplate = `{
                     "type": "number"
                 },
                 "id": {
-                    "type": "string"
+                    "type": "integer"
                 },
                 "price": {
                     "type": "number"
@@ -318,6 +321,9 @@ const docTemplate = `{
                 },
                 "balance": {
                     "type": "number"
+                },
+                "default_cost_basis": {
+                    "type": "string"
                 },
                 "owner_ids": {
                     "type": "array",
