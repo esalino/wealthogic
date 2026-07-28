@@ -149,14 +149,26 @@ func (h *fidelityTransactionsHandler) Process(db *gorm.DB, file io.Reader, opts 
 				}
 
 				// Transactions and holdings come from separate Fidelity
-				// exports, so the holding may not exist yet - link it if we
-				// find one, otherwise leave it unset.
+				// exports, so the holding may not exist yet. Link an existing
+				// one, otherwise create a bare holding from what the
+				// transaction knows - last price and current value stay zero
+				// until a holdings import fills them in.
 				var holding models.Holding
-				if err := tx.Where("symbol = ?", txn.Symbol).First(&holding).Error; err == nil {
-					lot.HoldingID = &holding.ID
-				} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+				err := tx.Where("symbol = ?", txn.Symbol).First(&holding).Error
+				switch {
+				case errors.Is(err, gorm.ErrRecordNotFound):
+					holding = models.Holding{
+						AssetType:   *txn.AssetType,
+						Symbol:      txn.Symbol,
+						Description: *txn.AssetDescription,
+					}
+					if err := tx.Create(&holding).Error; err != nil {
+						return fmt.Errorf("failed to create holding %s: %w", txn.Symbol, err)
+					}
+				case err != nil:
 					return fmt.Errorf("failed to look up holding %s: %w", txn.Symbol, err)
 				}
+				lot.HoldingID = &holding.ID
 
 				if err := tx.Create(&lot).Error; err != nil {
 					return fmt.Errorf("failed to create tax lot for %s on %s: %w", txn.Symbol, txn.Date.Format(fidelityDateLayout), err)
