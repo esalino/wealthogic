@@ -30,6 +30,16 @@ const (
 
 const fidelityDateLayout = "01/02/2006"
 
+// buyActionPrefix identifies a Fidelity "buy" action, e.g. "YOU BOUGHT ...".
+const buyActionPrefix = "YOU BOUGHT"
+
+// isStockBuy reports whether a transaction represents an outright stock
+// purchase, as opposed to an option trade, ETF, treasury, or other non-stock
+// action that also happens to start with "YOU BOUGHT".
+func isStockBuy(action string, assetType *string) bool {
+	return assetType != nil && *assetType == defaultAssetType && strings.HasPrefix(strings.ToUpper(action), buyActionPrefix)
+}
+
 // fidelityTransactionsHandler parses a Fidelity account history CSV and
 // creates one Transaction per row, tied to the account passed in Options.
 // Fidelity lists rows newest-first, but we want insertion order (and thus PK
@@ -117,10 +127,41 @@ func (h *fidelityTransactionsHandler) Process(db *gorm.DB, file io.Reader, opts 
 	// transaction so a bad row doesn't leave a partially imported file.
 	err := db.Transaction(func(tx *gorm.DB) error {
 		for i := len(transactions) - 1; i >= 0; i-- {
-			if err := tx.Create(&transactions[i]).Error; err != nil {
-				return fmt.Errorf("failed to create transaction for %s on %s: %w", transactions[i].Symbol, transactions[i].Date.Format(fidelityDateLayout), err)
+			txn := &transactions[i]
+			if err := tx.Create(txn).Error; err != nil {
+				return fmt.Errorf("failed to create transaction for %s on %s: %w", txn.Symbol, txn.Date.Format(fidelityDateLayout), err)
 			}
 			result.Created++
+
+			// A stock buy opens a new tax lot at the transaction's price and
+			// quantity. Sells, options, and other non-stock actions don't -
+			// that's a later step.
+			if isStockBuy(txn.Action, txn.AssetType) && txn.Quantity != nil && txn.Price != nil {
+				lot := models.TaxLot{
+					AssetType:         *txn.AssetType,
+					Symbol:            txn.Symbol,
+					AssetDescription:  *txn.AssetDescription,
+					PurchaseDate:      txn.Date,
+					PurchaseQuantity:  *txn.Quantity,
+					PurchasePrice:     *txn.Price,
+					RemainingQuantity: *txn.Quantity,
+					AccountID:         txn.AccountID,
+				}
+
+				// Transactions and holdings come from separate Fidelity
+				// exports, so the holding may not exist yet - link it if we
+				// find one, otherwise leave it unset.
+				var holding models.Holding
+				if err := tx.Where("symbol = ?", txn.Symbol).First(&holding).Error; err == nil {
+					lot.HoldingID = &holding.ID
+				} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+					return fmt.Errorf("failed to look up holding %s: %w", txn.Symbol, err)
+				}
+
+				if err := tx.Create(&lot).Error; err != nil {
+					return fmt.Errorf("failed to create tax lot for %s on %s: %w", txn.Symbol, txn.Date.Format(fidelityDateLayout), err)
+				}
+			}
 		}
 		return nil
 	})

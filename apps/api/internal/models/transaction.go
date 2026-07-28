@@ -13,8 +13,6 @@ type Transaction struct {
 	UpdatedAt time.Time      `json:"updated_at"`
 	DeletedAt gorm.DeletedAt `gorm:"index"                                          json:"-"`
 
-	AccountID uuid.UUID `gorm:"type:uuid" json:"account_id"`
-
 	AssetType        *string `json:"asset_type"`
 	Symbol           string  `json:"symbol"`
 	AssetDescription *string `json:"asset_description"`
@@ -31,4 +29,6 @@ type Transaction struct {
 	SettlementDate *time.Time `gorm:"type:date" json:"settlement_date"`
 
 	RealizedGains float64 `json:"realized_gains"`
+
+	AccountID uuid.UUID `gorm:"type:uuid" json:"account_id"`
 }

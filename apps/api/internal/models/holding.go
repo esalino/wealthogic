@@ -7,7 +7,7 @@ import (
 	"gorm.io/gorm"
 )
 
-// Holding represents a single holding. A holding can be made up of multiple child positions.
+// Holding represents a single holding. A holding can be made up of multiple child tax lots.
 type Holding struct {
 	ID        uuid.UUID      `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
 	CreatedAt time.Time      `json:"created_at"`
@@ -23,5 +23,5 @@ type Holding struct {
 	Quantity     float64 `gorm:"not null;default:0"  json:"purchase_quantity"`
 	CurrentValue float64 `json:"current_value"`
 
-	Positions []Position `json:"positions,omitempty"`
+	TaxLots []TaxLot `json:"tax_lots,omitempty"`
 }
