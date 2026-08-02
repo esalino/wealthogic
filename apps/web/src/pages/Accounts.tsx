@@ -512,17 +512,17 @@ export default function Accounts() {
           {/* Pagination */}
           <div className="flex items-center justify-between px-6 py-4 border-t border-outline-variant">
             <div className="flex items-center gap-2">
-              <span className="text-body-sm text-on-surface-variant">Rows per page</span>
+              <span className="text-label-sm text-on-surface-variant">Rows per page</span>
               <select
                 value={pagination.pageSize}
                 onChange={(e) => table.setPageSize(Number(e.target.value))}
-                className="px-2 py-1 bg-surface-container-low border border-outline-variant rounded-lg text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-secondary/30 focus:border-secondary transition-colors"
+                className="px-2 py-1 bg-surface-container-low border border-outline-variant rounded-lg text-label-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-secondary/30 focus:border-secondary transition-colors"
               >
                 {[10, 20, 50].map((size) => <option key={size} value={size}>{size}</option>)}
               </select>
             </div>
             <div className="flex items-center gap-3">
-              <p className="text-body-sm text-on-surface-variant">
+              <p className="text-label-sm text-on-surface-variant">
                 Page {table.getState().pagination.pageIndex + 1} of {Math.max(pageCount, 1)}
               </p>
               <div className="flex items-center gap-1">

@@ -28,7 +28,7 @@ export default function Sidebar({ onAddAccount }: SidebarProps) {
           </div>
           <div>
             <p className="text-headline-sm text-on-surface leading-none">Wealthogic</p>
-            <p className="text-label-sm text-on-surface-variant">Personal Finance</p>
+            <p className="text-label-sm text-on-surface-variant">Portfolio Tracker</p>
           </div>
         </div>
       </div>

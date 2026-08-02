@@ -23,5 +23,15 @@ type Holding struct {
 	Quantity     float64 `gorm:"not null;default:0"  json:"purchase_quantity"`
 	CurrentValue float64 `json:"current_value"`
 
+	AverageCostBasis float64 `json:"average_cost_basis"`
+	CostBasisTotal   float64 `gorm:"not null;default:0" json:"cost_basis_total"`
+
+	GainUnrealizedPercent float64 `gorm:"not null;default:0" json:"gain_unrealized_percent"`
+	GainUnrealizedAmount  float64 `gorm:"not null;default:0" json:"gain_unrealized_amount"`
+
+	GainRealizedPercent float64 `json:"gain_realized_percent"`
+	GainRealizedAmount  float64 `json:"gain_realized_amount"`
+	DividendIncome      float64 `json:"dividend_income"`
+
 	TaxLots []TaxLot `json:"tax_lots,omitempty"`
 }

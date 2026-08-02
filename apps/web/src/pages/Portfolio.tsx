@@ -27,30 +27,44 @@ interface Dividend {
 
 interface Holding {
   symbol: string
-  name: string
   assetClass: string
   price: string
   quantity: string
   marketValue: string
-  change: string
-  changeDir: ChangeDirection
   allocation: string
+  averageCostBasis: string
+  costBasisTotal: string
+  gainUnrealizedPercent: string
+  gainUnrealizedAmount: string
+  gainRealizedPercent: string
+  gainRealizedAmount: string
+  dividendIncome: string
   taxLots: TaxLot[]
   transactions: Transaction[]
   dividends: Dividend[]
 }
 
+// fillerHolding builds a placeholder holding with no sub-records, used only to
+// pad the hardcoded list out enough to demonstrate pagination.
+function fillerHolding(h: Omit<Holding, 'taxLots' | 'transactions' | 'dividends'>): Holding {
+  return { ...h, taxLots: [], transactions: [], dividends: [] }
+}
+
 const holdings: Holding[] = [
   {
     symbol: 'AAPL',
-    name: 'Apple Inc.',
     assetClass: 'Technology',
     price: '$189.43',
     quantity: '1,240.00',
     marketValue: '$234,893.20',
-    change: '+1.24%',
-    changeDir: 'positive',
     allocation: '9.46%',
+    averageCostBasis: '$182.56',
+    costBasisTotal: '$226,370.00',
+    gainUnrealizedPercent: '+3.77%',
+    gainUnrealizedAmount: '+$8,523.20',
+    gainRealizedPercent: '+2.10%',
+    gainRealizedAmount: '+$1,204.50',
+    dividendIncome: '$607.60',
     taxLots: [
       { dateAcquired: 'Oct 12, 2023', quantity: '500.00', costBasis: '$178.20', currentValue: '$94,715.00' },
       { dateAcquired: 'Jan 15, 2024', quantity: '740.00', costBasis: '$185.50', currentValue: '$140,178.20' },
@@ -66,14 +80,18 @@ const holdings: Holding[] = [
   },
   {
     symbol: 'MSFT',
-    name: 'Microsoft Corp.',
     assetClass: 'Technology',
     price: '$415.10',
     quantity: '480.00',
     marketValue: '$199,248.00',
-    change: '-0.82%',
-    changeDir: 'negative',
     allocation: '8.02%',
+    averageCostBasis: '$285.30',
+    costBasisTotal: '$136,942.00',
+    gainUnrealizedPercent: '+45.50%',
+    gainUnrealizedAmount: '+$62,306.00',
+    gainRealizedPercent: '+3.10%',
+    gainRealizedAmount: '+$2,450.00',
+    dividendIncome: '$720.00',
     taxLots: [
       { dateAcquired: 'Mar 03, 2023', quantity: '280.00', costBasis: '$255.40', currentValue: '$116,228.00' },
       { dateAcquired: 'Aug 21, 2023', quantity: '200.00', costBasis: '$327.15', currentValue: '$83,020.00' },
@@ -89,14 +107,18 @@ const holdings: Holding[] = [
   },
   {
     symbol: 'VTI',
-    name: 'Vanguard Total Stock',
     assetClass: 'ETF • Diversified',
     price: '$252.18',
     quantity: '3,500.00',
     marketValue: '$882,630.00',
-    change: '+0.45%',
-    changeDir: 'positive',
     allocation: '35.56%',
+    averageCostBasis: '$217.94',
+    costBasisTotal: '$762,800.00',
+    gainUnrealizedPercent: '+15.71%',
+    gainUnrealizedAmount: '+$119,830.00',
+    gainRealizedPercent: '+2.40%',
+    gainRealizedAmount: '+$5,600.00',
+    dividendIncome: '$5,950.00',
     taxLots: [
       { dateAcquired: 'Jan 04, 2022', quantity: '2,000.00', costBasis: '$221.05', currentValue: '$504,360.00' },
       { dateAcquired: 'Jul 19, 2023', quantity: '1,500.00', costBasis: '$213.80', currentValue: '$378,270.00' },
@@ -112,14 +134,18 @@ const holdings: Holding[] = [
   },
   {
     symbol: 'BND',
-    name: 'Vanguard Total Bond',
     assetClass: 'Fixed Income',
     price: '$72.45',
     quantity: '6,845.00',
     marketValue: '$495,920.25',
-    change: '0.00%',
-    changeDir: 'neutral',
     allocation: '19.98%',
+    averageCostBasis: '$78.90',
+    costBasisTotal: '$540,070.50',
+    gainUnrealizedPercent: '-8.18%',
+    gainUnrealizedAmount: '-$44,150.25',
+    gainRealizedPercent: '-0.15%',
+    gainRealizedAmount: '-$820.00',
+    dividendIncome: '$2,601.10',
     taxLots: [
       { dateAcquired: 'Feb 11, 2022', quantity: '6,845.00', costBasis: '$78.90', currentValue: '$495,920.25' },
     ],
@@ -131,22 +157,46 @@ const holdings: Holding[] = [
       { date: 'Jun 03, 2024', perShare: '$0.19', shares: '6,845.00', total: '$1,300.55' },
     ],
   },
+  fillerHolding({ symbol: 'GOOGL', assetClass: 'Technology', price: '$178.20', quantity: '850.00', marketValue: '$151,470.00', allocation: '6.10%', averageCostBasis: '$120.50', costBasisTotal: '$102,425.00', gainUnrealizedAmount: '+$49,045.00', gainUnrealizedPercent: '+47.88%', gainRealizedAmount: '+$0.00', gainRealizedPercent: '0.00%', dividendIncome: '$0.00' }),
+  fillerHolding({ symbol: 'AMZN', assetClass: 'Consumer Discretionary', price: '$198.40', quantity: '620.00', marketValue: '$123,008.00', allocation: '4.96%', averageCostBasis: '$145.30', costBasisTotal: '$90,086.00', gainUnrealizedAmount: '+$32,922.00', gainUnrealizedPercent: '+36.54%', gainRealizedAmount: '+$0.00', gainRealizedPercent: '0.00%', dividendIncome: '$0.00' }),
+  fillerHolding({ symbol: 'NVDA', assetClass: 'Technology', price: '$121.85', quantity: '1,100.00', marketValue: '$134,035.00', allocation: '5.40%', averageCostBasis: '$65.40', costBasisTotal: '$71,940.00', gainUnrealizedAmount: '+$62,095.00', gainUnrealizedPercent: '+86.32%', gainRealizedAmount: '+$1,850.00', gainRealizedPercent: '+2.57%', dividendIncome: '$44.00' }),
+  fillerHolding({ symbol: 'TSLA', assetClass: 'Consumer Discretionary', price: '$242.10', quantity: '400.00', marketValue: '$96,840.00', allocation: '3.90%', averageCostBasis: '$275.60', costBasisTotal: '$110,240.00', gainUnrealizedAmount: '-$13,400.00', gainUnrealizedPercent: '-12.16%', gainRealizedAmount: '-$2,300.00', gainRealizedPercent: '-2.09%', dividendIncome: '$0.00' }),
+  fillerHolding({ symbol: 'JPM', assetClass: 'Financial Services', price: '$198.75', quantity: '500.00', marketValue: '$99,375.00', allocation: '4.00%', averageCostBasis: '$150.20', costBasisTotal: '$75,100.00', gainUnrealizedAmount: '+$24,275.00', gainUnrealizedPercent: '+32.32%', gainRealizedAmount: '+$900.00', gainRealizedPercent: '+1.20%', dividendIncome: '$1,050.00' }),
+  fillerHolding({ symbol: 'JNJ', assetClass: 'Healthcare', price: '$158.30', quantity: '700.00', marketValue: '$110,810.00', allocation: '4.46%', averageCostBasis: '$162.10', costBasisTotal: '$113,470.00', gainUnrealizedAmount: '-$2,660.00', gainUnrealizedPercent: '-2.34%', gainRealizedAmount: '+$0.00', gainRealizedPercent: '0.00%', dividendIncome: '$2,380.00' }),
+  fillerHolding({ symbol: 'XOM', assetClass: 'Energy', price: '$114.60', quantity: '900.00', marketValue: '$103,140.00', allocation: '4.15%', averageCostBasis: '$98.75', costBasisTotal: '$88,875.00', gainUnrealizedAmount: '+$14,265.00', gainUnrealizedPercent: '+16.05%', gainRealizedAmount: '+$1,200.00', gainRealizedPercent: '+1.35%', dividendIncome: '$3,285.00' }),
+  fillerHolding({ symbol: 'KO', assetClass: 'Consumer Staples', price: '$61.45', quantity: '1,500.00', marketValue: '$92,175.00', allocation: '3.71%', averageCostBasis: '$52.80', costBasisTotal: '$79,200.00', gainUnrealizedAmount: '+$12,975.00', gainUnrealizedPercent: '+16.38%', gainRealizedAmount: '+$450.00', gainRealizedPercent: '+0.57%', dividendIncome: '$2,760.00' }),
 ]
 
 const subTabs = ['Tax Lots', 'Transactions', 'Dividends'] as const
 type SubTab = (typeof subTabs)[number]
 
-function changeChip(change: string, dir: ChangeDirection) {
-  const base = 'inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold tabular-nums'
-  if (dir === 'positive') return <span className={`${base} bg-secondary-container text-on-secondary-container`}>{change}</span>
-  if (dir === 'negative') return <span className={`${base} bg-error-container text-on-error-container`}>{change}</span>
-  return <span className={`${base} bg-surface-container text-on-surface-variant`}>{change}</span>
-}
-
 const addLabels: Record<SubTab, string> = {
   'Tax Lots': 'Add Lot',
   Transactions: 'Add Transaction',
   Dividends: 'Add Dividend',
+}
+
+function gainDir(amount: string): ChangeDirection {
+  const n = parseFloat(amount.replace(/[^0-9.-]/g, ''))
+  if (n > 0) return 'positive'
+  if (n < 0) return 'negative'
+  return 'neutral'
+}
+
+function gainColor(dir: ChangeDirection) {
+  if (dir === 'positive') return 'text-secondary'
+  if (dir === 'negative') return 'text-error'
+  return 'text-on-surface'
+}
+
+function gainCell(amount: string, percent: string) {
+  const color = gainColor(gainDir(amount))
+  return (
+    <td className="px-4 py-4 text-right tabular-nums">
+      <div className={`text-data-tabular font-semibold ${color}`}>{amount}</div>
+      <div className={`text-label-sm ${color}`}>{percent}</div>
+    </td>
+  )
 }
 
 function rowActions() {
@@ -304,8 +354,9 @@ export default function Portfolio() {
   const [mounted, setMounted] = useState(false)
   const [showToast, setShowToast] = useState(false)
   const [sortBy, setSortBy] = useState('Market Value High to Low')
-  const [expandedIndex, setExpandedIndex] = useState<number | null>(0)
+  const [expandedSymbol, setExpandedSymbol] = useState<string | null>('AAPL')
   const [activeTab, setActiveTab] = useState<SubTab>('Tax Lots')
+  const [pagination, setPagination] = useState({ pageIndex: 0, pageSize: 10 })
 
   useEffect(() => {
     const t1 = setTimeout(() => setMounted(true), 100)
@@ -318,14 +369,20 @@ export default function Portfolio() {
     }
   }, [])
 
-  function toggleRow(i: number) {
-    if (expandedIndex === i) {
-      setExpandedIndex(null)
+  function toggleRow(symbol: string) {
+    if (expandedSymbol === symbol) {
+      setExpandedSymbol(null)
     } else {
-      setExpandedIndex(i)
+      setExpandedSymbol(symbol)
       setActiveTab('Tax Lots')
     }
   }
+
+  const pageCount = Math.max(1, Math.ceil(holdings.length / pagination.pageSize))
+  const pageStart = pagination.pageIndex * pagination.pageSize
+  const pageHoldings = holdings.slice(pageStart, pageStart + pagination.pageSize)
+  const canPrev = pagination.pageIndex > 0
+  const canNext = pagination.pageIndex < pageCount - 1
 
   return (
     <>
@@ -447,24 +504,28 @@ export default function Portfolio() {
             <table className="w-full">
               <thead>
                 <tr className="border-b border-outline-variant">
-                  <th className="text-left px-6 py-3 text-label-caps text-on-surface-variant uppercase">Symbol</th>
-                  <th className="text-right px-6 py-3 text-label-caps text-on-surface-variant uppercase">Price</th>
-                  <th className="text-right px-6 py-3 text-label-caps text-on-surface-variant uppercase">Quantity</th>
-                  <th className="text-right px-6 py-3 text-label-caps text-on-surface-variant uppercase">Market Value</th>
-                  <th className="text-center px-6 py-3 text-label-caps text-on-surface-variant uppercase">24h Change</th>
-                  <th className="text-right px-6 py-3 text-label-caps text-on-surface-variant uppercase">Allocation</th>
+                  <th className="text-left px-4 py-3 text-label-caps text-on-surface-variant uppercase">Symbol</th>
+                  <th className="text-right px-4 py-3 text-label-caps text-on-surface-variant uppercase">Price</th>
+                  <th className="text-right px-4 py-3 text-label-caps text-on-surface-variant uppercase">Quantity</th>
+                  <th className="text-right px-4 py-3 text-label-caps text-on-surface-variant uppercase">Market Value</th>
+                  <th className="text-right px-4 py-3 text-label-caps text-on-surface-variant uppercase">Avg Cost</th>
+                  <th className="text-right px-4 py-3 text-label-caps text-on-surface-variant uppercase">Cost Basis</th>
+                  <th className="text-right px-4 py-3 text-label-caps text-on-surface-variant uppercase">Unrealized Gain</th>
+                  <th className="text-right px-4 py-3 text-label-caps text-on-surface-variant uppercase">Realized Gain</th>
+                  <th className="text-right px-4 py-3 text-label-caps text-on-surface-variant uppercase">Dividend Income</th>
+                  <th className="text-right px-4 py-3 text-label-caps text-on-surface-variant uppercase">Allocation</th>
                 </tr>
               </thead>
               <tbody>
-                {holdings.map((h, i) => {
-                  const expanded = expandedIndex === i
+                {pageHoldings.map((h) => {
+                  const expanded = expandedSymbol === h.symbol
                   return (
                     <Fragment key={h.symbol}>
                       <tr
-                        onClick={() => toggleRow(i)}
+                        onClick={() => toggleRow(h.symbol)}
                         className="group border-b border-outline-variant hover:bg-surface-container-low transition-colors cursor-pointer"
                       >
-                        <td className="px-6 py-4">
+                        <td className="px-4 py-4">
                           <div className="flex items-center gap-3">
                             <span
                               className={`material-symbols-outlined text-lg text-on-surface-variant transition-transform group-hover:text-primary ${
@@ -473,20 +534,21 @@ export default function Portfolio() {
                             >
                               chevron_right
                             </span>
-                            <div className="w-8 h-8 rounded bg-primary-container flex items-center justify-center text-on-primary font-bold text-[10px]">
-                              {h.symbol}
-                            </div>
                             <div>
-                              <p className="text-body-md font-semibold text-on-surface">{h.name}</p>
+                              <p className="text-body-md font-semibold text-on-surface">{h.symbol}</p>
                               <p className="text-label-sm text-on-surface-variant">{h.assetClass}</p>
                             </div>
                           </div>
                         </td>
-                        <td className="px-6 py-4 text-right text-data-tabular text-on-surface tabular-nums">{h.price}</td>
-                        <td className="px-6 py-4 text-right text-data-tabular text-on-surface tabular-nums">{h.quantity}</td>
-                        <td className="px-6 py-4 text-right text-data-tabular font-semibold text-on-surface tabular-nums">{h.marketValue}</td>
-                        <td className="px-6 py-4 text-center">{changeChip(h.change, h.changeDir)}</td>
-                        <td className="px-6 py-4 text-right text-data-tabular text-on-surface-variant tabular-nums">
+                        <td className="px-4 py-4 text-right text-data-tabular text-on-surface tabular-nums">{h.price}</td>
+                        <td className="px-4 py-4 text-right text-data-tabular text-on-surface tabular-nums">{h.quantity}</td>
+                        <td className="px-4 py-4 text-right text-data-tabular font-semibold text-on-surface tabular-nums">{h.marketValue}</td>
+                        <td className="px-4 py-4 text-right text-data-tabular text-on-surface tabular-nums">{h.averageCostBasis}</td>
+                        <td className="px-4 py-4 text-right text-data-tabular text-on-surface tabular-nums">{h.costBasisTotal}</td>
+                        {gainCell(h.gainUnrealizedAmount, h.gainUnrealizedPercent)}
+                        {gainCell(h.gainRealizedAmount, h.gainRealizedPercent)}
+                        <td className="px-4 py-4 text-right text-data-tabular text-on-surface tabular-nums">{h.dividendIncome}</td>
+                        <td className="px-4 py-4 text-right text-data-tabular text-on-surface-variant tabular-nums">
                           <span className="inline-flex items-center gap-2">
                             {h.allocation}
                             <button
@@ -501,7 +563,7 @@ export default function Portfolio() {
                       </tr>
                       {expanded && (
                         <tr className="bg-surface-container-lowest border-b border-outline-variant">
-                          <td className="p-0" colSpan={6}>
+                          <td className="p-0" colSpan={10}>
                             <SubPanel holding={h} activeTab={activeTab} onTabChange={setActiveTab} />
                           </td>
                         </tr>
@@ -512,11 +574,39 @@ export default function Portfolio() {
               </tbody>
             </table>
           </div>
-          <div className="px-6 py-4 border-t border-outline-variant flex justify-center">
-            <button className="flex items-center gap-2 py-2 text-body-md text-secondary font-semibold hover:opacity-80 transition-opacity">
-              View all 24 holdings
-              <span className="material-symbols-outlined text-base">arrow_forward</span>
-            </button>
+          {/* Pagination */}
+          <div className="flex items-center justify-between px-6 py-4 border-t border-outline-variant">
+            <div className="flex items-center gap-2">
+              <span className="text-label-sm text-on-surface-variant">Rows per page</span>
+              <select
+                value={pagination.pageSize}
+                onChange={(e) => setPagination({ pageIndex: 0, pageSize: Number(e.target.value) })}
+                className="px-2 py-1 bg-surface-container-low border border-outline-variant rounded-lg text-label-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-secondary/30 focus:border-secondary transition-colors"
+              >
+                {[10, 20, 50].map((size) => <option key={size} value={size}>{size}</option>)}
+              </select>
+            </div>
+            <div className="flex items-center gap-3">
+              <p className="text-label-sm text-on-surface-variant">
+                Page {pagination.pageIndex + 1} of {pageCount}
+              </p>
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => setPagination((p) => ({ ...p, pageIndex: p.pageIndex - 1 }))}
+                  disabled={!canPrev}
+                  className="w-8 h-8 flex items-center justify-center rounded-lg text-on-surface-variant hover:bg-surface-container-high transition-colors disabled:opacity-40"
+                >
+                  <span className="material-symbols-outlined text-xl">chevron_left</span>
+                </button>
+                <button
+                  onClick={() => setPagination((p) => ({ ...p, pageIndex: p.pageIndex + 1 }))}
+                  disabled={!canNext}
+                  className="w-8 h-8 flex items-center justify-center rounded-lg text-on-surface-variant hover:bg-surface-container-high transition-colors disabled:opacity-40"
+                >
+                  <span className="material-symbols-outlined text-xl">chevron_right</span>
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       </div>
