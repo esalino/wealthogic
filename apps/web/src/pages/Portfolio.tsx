@@ -352,7 +352,6 @@ const sectors: Sector[] = [
 
 export default function Portfolio() {
   const [mounted, setMounted] = useState(false)
-  const [showToast, setShowToast] = useState(false)
   const [sortBy, setSortBy] = useState('Market Value High to Low')
   const [expandedSymbol, setExpandedSymbol] = useState<string | null>('AAPL')
   const [activeTab, setActiveTab] = useState<SubTab>('Tax Lots')
@@ -360,13 +359,7 @@ export default function Portfolio() {
 
   useEffect(() => {
     const t1 = setTimeout(() => setMounted(true), 100)
-    const t2 = setTimeout(() => setShowToast(true), 2000)
-    const t3 = setTimeout(() => setShowToast(false), 6000)
-    return () => {
-      clearTimeout(t1)
-      clearTimeout(t2)
-      clearTimeout(t3)
-    }
+    return () => clearTimeout(t1)
   }, [])
 
   function toggleRow(symbol: string) {
@@ -608,18 +601,6 @@ export default function Portfolio() {
               </div>
             </div>
           </div>
-        </div>
-      </div>
-
-      {/* Toast notification */}
-      <div
-        className={`fixed bottom-6 right-6 z-50 transition-all duration-500 ${
-          showToast ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4 pointer-events-none'
-        }`}
-      >
-        <div className="flex items-center gap-3 bg-inverse-surface text-inverse-on-surface px-4 py-3 rounded-xl shadow-lg">
-          <span className="material-symbols-outlined text-secondary text-xl">check_circle</span>
-          <span className="text-body-md">Market data updated in real-time</span>
         </div>
       </div>
     </>

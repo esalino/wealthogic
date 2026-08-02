@@ -1,8 +1,8 @@
-export default function TopNav() {
+export default function TopNav({ pinned }: { pinned: boolean }) {
   return (
-    <header className="fixed top-0 left-nav-width right-0 h-16 bg-surface-container-lowest border-b border-outline-variant flex items-center px-6 gap-4 z-20">
+    <header className={`fixed top-0 ${pinned ? 'left-nav-width' : 'left-20'} right-0 h-16 bg-surface-container-lowest border-b border-outline-variant flex items-center px-6 gap-4 z-20 transition-[left] duration-200 ease-out`}>
       {/* Search */}
-      <div className="flex-1 max-w-xl">
+      <div className="w-full max-w-xl ml-auto">
         <div className="relative">
           <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant text-xl">search</span>
           <input
