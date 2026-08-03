@@ -192,7 +192,7 @@ definitions:
       fees:
         type: number
       id:
-        type: integer
+        type: string
       price:
         type: number
       quantity:
@@ -204,6 +204,29 @@ definitions:
       symbol:
         type: string
       updated_at:
+        type: string
+    type: object
+  UpdateHoldingRequest:
+    properties:
+      asset_type:
+        type: string
+      average_cost_basis:
+        type: number
+      cost_basis_total:
+        type: number
+      current_value:
+        type: number
+      description:
+        type: string
+      dividend_income:
+        type: number
+      last_price:
+        type: number
+      purchase_quantity:
+        type: number
+      status:
+        type: string
+      symbol:
         type: string
     type: object
   UploadResult:
@@ -351,6 +374,50 @@ paths:
               type: string
             type: object
       summary: Create a new holding
+      tags:
+      - holdings
+  /holdings/{id}:
+    patch:
+      consumes:
+      - application/json
+      parameters:
+      - description: Holding ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Holding payload
+        in: body
+        name: holding
+        required: true
+        schema:
+          $ref: '#/definitions/UpdateHoldingRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/Holding'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Update an existing holding
       tags:
       - holdings
   /uploads:

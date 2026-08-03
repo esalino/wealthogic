@@ -11,7 +11,7 @@ import (
 // price - within a Holding. Not limited to equities; any asset bought in
 // discrete batches (shares, crypto, etc.) uses this to track cost basis.
 type TaxLot struct {
-	ID        uuid.UUID      `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	ID        uuid.UUID      `gorm:"type:uuid;default:uuidv7();primaryKey" json:"id"`
 	CreatedAt time.Time      `json:"created_at"`
 	UpdatedAt time.Time      `json:"updated_at"`
 	DeletedAt gorm.DeletedAt `gorm:"index"                                          json:"-"`

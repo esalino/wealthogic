@@ -83,3 +83,20 @@ export async function createHolding(payload: CreateHoldingPayload): Promise<Hold
 
   return res.json()
 }
+
+export type UpdateHoldingPayload = CreateHoldingPayload
+
+export async function updateHolding(id: string, payload: UpdateHoldingPayload): Promise<Holding> {
+  const res = await fetch(`${API_BASE}/holdings/${id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.error ?? 'Failed to update holding')
+  }
+
+  return res.json()
+}

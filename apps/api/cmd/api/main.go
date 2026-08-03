@@ -57,6 +57,7 @@ func main() {
 	r.PATCH("/accounts/:id", accountHandler.UpdateAccount)
 	r.GET("/holdings", holdingHandler.GetHoldings)
 	r.POST("/holdings", holdingHandler.CreateHolding)
+	r.PATCH("/holdings/:id", holdingHandler.UpdateHolding)
 	r.GET("/users", userHandler.GetUsers)
 	r.POST("/uploads", uploadHandler.Upload)
 

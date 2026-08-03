@@ -1,6 +1,13 @@
-import { Fragment, useState, useEffect } from 'react'
+import { Fragment, useRef, useState, useEffect } from 'react'
+import { createPortal } from 'react-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { createHolding, getHoldings, type Holding as ApiHolding } from '../api/holdings'
+import {
+  createHolding,
+  getHoldings,
+  updateHolding,
+  type CreateHoldingPayload,
+  type Holding as ApiHolding,
+} from '../api/holdings'
 
 type ChangeDirection = 'positive' | 'negative' | 'neutral'
 
@@ -274,51 +281,177 @@ const sectors: Sector[] = [
 
 const ASSET_TYPES = ['Stock', 'ETF', 'Mutual Fund', 'Bond', 'Money Market', 'Crypto', 'Other']
 
+// ── Shared holding form ───────────────────────────────────────────────────────
+
+interface HoldingFields {
+  assetType: string
+  symbol: string
+  description: string
+  quantity: string
+  lastPrice: string
+  avgCostBasis: string
+  dividendIncome: string
+}
+
+const emptyHoldingFields: HoldingFields = {
+  assetType: 'Stock',
+  symbol: '',
+  description: '',
+  quantity: '',
+  lastPrice: '',
+  avgCostBasis: '',
+  dividendIncome: '',
+}
+
+function fieldsFromHolding(h: ApiHolding): HoldingFields {
+  return {
+    assetType: h.asset_type || 'Stock',
+    symbol: h.symbol ?? '',
+    description: h.description ?? '',
+    quantity: String(h.purchase_quantity ?? ''),
+    lastPrice: String(h.last_price ?? ''),
+    avgCostBasis: String(h.average_cost_basis ?? ''),
+    dividendIncome: String(h.dividend_income ?? ''),
+  }
+}
+
+function fieldsToPayload(f: HoldingFields): CreateHoldingPayload {
+  const qty = parseFloat(f.quantity) || 0
+  const price = parseFloat(f.lastPrice) || 0
+  const avgCost = parseFloat(f.avgCostBasis) || 0
+  return {
+    asset_type: f.assetType,
+    symbol: f.symbol.trim(),
+    description: f.description.trim(),
+    last_price: price,
+    purchase_quantity: qty,
+    // current_value and cost_basis_total are derived from the entered
+    // quantity, price, and average cost rather than asked for directly.
+    current_value: price * qty,
+    average_cost_basis: avgCost,
+    cost_basis_total: avgCost * qty,
+    dividend_income: parseFloat(f.dividendIncome) || 0,
+  }
+}
+
+const modalInputCls = 'w-full px-3 py-2.5 bg-surface-container-low border border-outline-variant rounded-lg text-body-md text-on-surface placeholder:text-on-surface-variant focus:outline-none focus:ring-2 focus:ring-secondary/30 focus:border-secondary transition-colors'
+const modalNumInputCls = `${modalInputCls} tabular-nums`
+
+function HoldingFormFields({
+  fields,
+  set,
+}: {
+  fields: HoldingFields
+  set: <K extends keyof HoldingFields>(key: K, value: HoldingFields[K]) => void
+}) {
+  return (
+    <div className="space-y-4">
+      <div>
+        <label className="block text-label-sm font-semibold text-on-surface mb-1.5">Symbol</label>
+        <input
+          type="text"
+          value={fields.symbol}
+          onChange={(e) => set('symbol', e.target.value)}
+          placeholder="e.g. AAPL"
+          className={modalInputCls}
+        />
+      </div>
+
+      <div>
+        <label className="block text-label-sm font-semibold text-on-surface mb-1.5">Description</label>
+        <input
+          type="text"
+          value={fields.description}
+          onChange={(e) => set('description', e.target.value)}
+          placeholder="e.g. Apple Inc."
+          className={modalInputCls}
+        />
+      </div>
+
+      <div>
+        <label className="block text-label-sm font-semibold text-on-surface mb-1.5">Asset Type</label>
+        <select value={fields.assetType} onChange={(e) => set('assetType', e.target.value)} className={modalInputCls}>
+          {ASSET_TYPES.map((t) => <option key={t}>{t}</option>)}
+        </select>
+      </div>
+
+      <div className="grid grid-cols-2 gap-4">
+        <div>
+          <label className="block text-label-sm font-semibold text-on-surface mb-1.5">Quantity</label>
+          <input
+            type="number"
+            value={fields.quantity}
+            onChange={(e) => set('quantity', e.target.value)}
+            placeholder="0.00"
+            className={modalNumInputCls}
+          />
+        </div>
+        <div>
+          <label className="block text-label-sm font-semibold text-on-surface mb-1.5">Last Price</label>
+          <div className="relative">
+            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-body-md text-on-surface-variant">$</span>
+            <input
+              type="number"
+              value={fields.lastPrice}
+              onChange={(e) => set('lastPrice', e.target.value)}
+              placeholder="0.00"
+              className={`${modalNumInputCls} pl-7`}
+            />
+          </div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-4">
+        <div>
+          <label className="block text-label-sm font-semibold text-on-surface mb-1.5">Avg Cost Basis</label>
+          <div className="relative">
+            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-body-md text-on-surface-variant">$</span>
+            <input
+              type="number"
+              value={fields.avgCostBasis}
+              onChange={(e) => set('avgCostBasis', e.target.value)}
+              placeholder="0.00"
+              className={`${modalNumInputCls} pl-7`}
+            />
+          </div>
+        </div>
+        <div>
+          <label className="block text-label-sm font-semibold text-on-surface mb-1.5">Dividend Income</label>
+          <div className="relative">
+            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-body-md text-on-surface-variant">$</span>
+            <input
+              type="number"
+              value={fields.dividendIncome}
+              onChange={(e) => set('dividendIncome', e.target.value)}
+              placeholder="0.00"
+              className={`${modalNumInputCls} pl-7`}
+            />
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── Add holding modal ─────────────────────────────────────────────────────────
 
 function AddHoldingModal({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) {
   const queryClient = useQueryClient()
-  const [assetType, setAssetType] = useState('Stock')
-  const [symbol, setSymbol] = useState('')
-  const [description, setDescription] = useState('')
-  const [quantity, setQuantity] = useState('')
-  const [lastPrice, setLastPrice] = useState('')
-  const [avgCostBasis, setAvgCostBasis] = useState('')
-  const [dividendIncome, setDividendIncome] = useState('')
+  const [fields, setFields] = useState<HoldingFields>(emptyHoldingFields)
+  const set = <K extends keyof HoldingFields>(key: K, value: HoldingFields[K]) =>
+    setFields((f) => ({ ...f, [key]: value }))
 
   const { mutate, isPending, error, reset } = useMutation({
     mutationFn: createHolding,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['holdings'] })
-      setAssetType('Stock'); setSymbol(''); setDescription('')
-      setQuantity(''); setLastPrice(''); setAvgCostBasis(''); setDividendIncome('')
-      reset(); onClose()
+      setFields(emptyHoldingFields)
+      reset()
+      onClose()
     },
   })
 
   if (!isOpen) return null
-
-  const inputCls = 'w-full px-3 py-2.5 bg-surface-container-low border border-outline-variant rounded-lg text-body-md text-on-surface placeholder:text-on-surface-variant focus:outline-none focus:ring-2 focus:ring-secondary/30 focus:border-secondary transition-colors'
-  const numInputCls = `${inputCls} tabular-nums`
-
-  function submit() {
-    const qty = parseFloat(quantity) || 0
-    const price = parseFloat(lastPrice) || 0
-    const avgCost = parseFloat(avgCostBasis) || 0
-    mutate({
-      asset_type: assetType,
-      symbol: symbol.trim(),
-      description: description.trim(),
-      last_price: price,
-      purchase_quantity: qty,
-      // current_value and cost_basis_total are derived from the entered
-      // quantity, price, and average cost rather than asked for directly.
-      current_value: price * qty,
-      average_cost_basis: avgCost,
-      cost_basis_total: avgCost * qty,
-      dividend_income: parseFloat(dividendIncome) || 0,
-    })
-  }
 
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4" onClick={onClose}>
@@ -335,91 +468,7 @@ function AddHoldingModal({ isOpen, onClose }: { isOpen: boolean; onClose: () => 
           </button>
         </div>
 
-        <div className="space-y-4">
-          <div>
-            <label className="block text-label-sm font-semibold text-on-surface mb-1.5">Symbol</label>
-            <input
-              type="text"
-              value={symbol}
-              onChange={(e) => setSymbol(e.target.value)}
-              placeholder="e.g. AAPL"
-              className={inputCls}
-            />
-          </div>
-
-          <div>
-            <label className="block text-label-sm font-semibold text-on-surface mb-1.5">Description</label>
-            <input
-              type="text"
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              placeholder="e.g. Apple Inc."
-              className={inputCls}
-            />
-          </div>
-
-          <div>
-            <label className="block text-label-sm font-semibold text-on-surface mb-1.5">Asset Type</label>
-            <select value={assetType} onChange={(e) => setAssetType(e.target.value)} className={inputCls}>
-              {ASSET_TYPES.map((t) => <option key={t}>{t}</option>)}
-            </select>
-          </div>
-
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-label-sm font-semibold text-on-surface mb-1.5">Quantity</label>
-              <input
-                type="number"
-                value={quantity}
-                onChange={(e) => setQuantity(e.target.value)}
-                placeholder="0.00"
-                className={numInputCls}
-              />
-            </div>
-            <div>
-              <label className="block text-label-sm font-semibold text-on-surface mb-1.5">Last Price</label>
-              <div className="relative">
-                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-body-md text-on-surface-variant">$</span>
-                <input
-                  type="number"
-                  value={lastPrice}
-                  onChange={(e) => setLastPrice(e.target.value)}
-                  placeholder="0.00"
-                  className={`${numInputCls} pl-7`}
-                />
-              </div>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-label-sm font-semibold text-on-surface mb-1.5">Avg Cost Basis</label>
-              <div className="relative">
-                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-body-md text-on-surface-variant">$</span>
-                <input
-                  type="number"
-                  value={avgCostBasis}
-                  onChange={(e) => setAvgCostBasis(e.target.value)}
-                  placeholder="0.00"
-                  className={`${numInputCls} pl-7`}
-                />
-              </div>
-            </div>
-            <div>
-              <label className="block text-label-sm font-semibold text-on-surface mb-1.5">Dividend Income</label>
-              <div className="relative">
-                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-body-md text-on-surface-variant">$</span>
-                <input
-                  type="number"
-                  value={dividendIncome}
-                  onChange={(e) => setDividendIncome(e.target.value)}
-                  placeholder="0.00"
-                  className={`${numInputCls} pl-7`}
-                />
-              </div>
-            </div>
-          </div>
-        </div>
+        <HoldingFormFields fields={fields} set={set} />
 
         {error && <p className="mt-4 text-body-sm text-error">{(error as Error).message}</p>}
 
@@ -428,14 +477,139 @@ function AddHoldingModal({ isOpen, onClose }: { isOpen: boolean; onClose: () => 
             Cancel
           </button>
           <button
-            onClick={submit}
-            disabled={isPending || !description.trim()}
+            onClick={() => mutate(fieldsToPayload(fields))}
+            disabled={isPending || !fields.description.trim()}
             className="flex-1 px-4 py-2.5 bg-primary text-on-primary rounded-lg text-body-md font-semibold hover:opacity-90 transition-opacity disabled:opacity-50"
           >
             {isPending ? 'Saving…' : 'Add Holding'}
           </button>
         </div>
       </div>
+    </div>
+  )
+}
+
+// ── Edit holding modal ────────────────────────────────────────────────────────
+
+function EditHoldingModal({ holding, onClose }: { holding: ApiHolding | null; onClose: () => void }) {
+  const queryClient = useQueryClient()
+  // Initialized once from the holding; the parent remounts this modal per
+  // holding via a `key`, so no effect is needed to sync when it changes.
+  const [fields, setFields] = useState<HoldingFields>(() =>
+    holding ? fieldsFromHolding(holding) : emptyHoldingFields,
+  )
+  const set = <K extends keyof HoldingFields>(key: K, value: HoldingFields[K]) =>
+    setFields((f) => ({ ...f, [key]: value }))
+
+  const { mutate, isPending, error } = useMutation({
+    mutationFn: ({ id, payload }: { id: string; payload: Parameters<typeof updateHolding>[1] }) =>
+      updateHolding(id, payload),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['holdings'] })
+      onClose()
+    },
+  })
+
+  if (!holding) return null
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4" onClick={onClose}>
+      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" />
+      <div
+        className="relative bg-surface-container-lowest rounded-xl shadow-card w-full max-w-md p-6"
+        onClick={(e) => e.stopPropagation()}
+        style={{ animation: 'slideUp 0.25s ease-out' }}
+      >
+        <div className="flex items-center justify-between mb-6">
+          <h2 className="text-headline-sm text-on-surface">Edit Holding</h2>
+          <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-lg text-on-surface-variant hover:bg-surface-container-high transition-colors">
+            <span className="material-symbols-outlined text-xl">close</span>
+          </button>
+        </div>
+
+        <HoldingFormFields fields={fields} set={set} />
+
+        {error && <p className="mt-4 text-body-sm text-error">{(error as Error).message}</p>}
+
+        <div className="flex gap-3 mt-6">
+          <button onClick={onClose} disabled={isPending} className="flex-1 px-4 py-2.5 border border-outline-variant rounded-lg text-body-md text-on-surface hover:bg-surface-container-high transition-colors disabled:opacity-50">
+            Cancel
+          </button>
+          <button
+            onClick={() => mutate({ id: holding.id, payload: fieldsToPayload(fields) })}
+            disabled={isPending || !fields.description.trim()}
+            className="flex-1 px-4 py-2.5 bg-primary text-on-primary rounded-lg text-body-md font-semibold hover:opacity-90 transition-opacity disabled:opacity-50"
+          >
+            {isPending ? 'Saving…' : 'Save Changes'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── Row action menu ───────────────────────────────────────────────────────────
+
+function RowMenu({ onEdit }: { onEdit: () => void }) {
+  const [open, setOpen] = useState(false)
+  const [pos, setPos] = useState({ top: 0, right: 0 })
+  const btnRef = useRef<HTMLButtonElement>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    function handler(e: MouseEvent) {
+      if (btnRef.current?.contains(e.target as Node)) return
+      if (menuRef.current?.contains(e.target as Node)) return
+      setOpen(false)
+    }
+    // The menu is fixed-positioned, so close it if the page scrolls or resizes
+    function close() { setOpen(false) }
+    document.addEventListener('mousedown', handler)
+    window.addEventListener('scroll', close, true)
+    window.addEventListener('resize', close)
+    return () => {
+      document.removeEventListener('mousedown', handler)
+      window.removeEventListener('scroll', close, true)
+      window.removeEventListener('resize', close)
+    }
+  }, [open])
+
+  function toggle() {
+    if (!open && btnRef.current) {
+      const rect = btnRef.current.getBoundingClientRect()
+      setPos({ top: rect.bottom + 4, right: window.innerWidth - rect.right })
+    }
+    setOpen((v) => !v)
+  }
+
+  return (
+    <div className="relative inline-flex">
+      <button
+        ref={btnRef}
+        onClick={toggle}
+        className="text-on-surface-variant hover:text-primary transition-colors"
+        aria-label="More actions"
+      >
+        <span className="material-symbols-outlined text-lg align-middle">more_vert</span>
+      </button>
+
+      {open && createPortal(
+        <div
+          ref={menuRef}
+          style={{ top: pos.top, right: pos.right }}
+          className="fixed z-40 w-36 bg-surface-container-lowest rounded-lg shadow-card border border-outline-variant py-1"
+        >
+          <button
+            onClick={() => { setOpen(false); onEdit() }}
+            className="w-full flex items-center gap-2 px-3 py-2 text-body-md text-on-surface hover:bg-surface-container-low transition-colors"
+          >
+            <span className="material-symbols-outlined text-base">edit</span>
+            Edit
+          </button>
+        </div>,
+        document.body,
+      )}
     </div>
   )
 }
@@ -447,6 +621,7 @@ export default function Portfolio() {
   const [activeTab, setActiveTab] = useState<SubTab>('Tax Lots')
   const [pagination, setPagination] = useState({ pageIndex: 0, pageSize: 10 })
   const [addOpen, setAddOpen] = useState(false)
+  const [editingHolding, setEditingHolding] = useState<ApiHolding | null>(null)
 
   const { data, isLoading, isError, error } = useQuery({
     queryKey: ['holdings', pagination.pageIndex, pagination.pageSize],
@@ -665,15 +840,14 @@ export default function Portfolio() {
                         {gainCell(h.gainRealizedAmount, h.gainRealizedPercent)}
                         <td className="px-4 py-4 text-right text-data-tabular text-on-surface tabular-nums">{h.dividendIncome}</td>
                         <td className="px-4 py-4 text-right text-data-tabular text-on-surface-variant tabular-nums">
-                          <span className="inline-flex items-center gap-2">
+                          <span className="inline-flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
                             {h.allocation}
-                            <button
-                              onClick={(e) => e.stopPropagation()}
-                              className="text-on-surface-variant hover:text-primary transition-colors"
-                              aria-label="More actions"
-                            >
-                              <span className="material-symbols-outlined text-lg align-middle">more_vert</span>
-                            </button>
+                            <RowMenu
+                              onEdit={() => {
+                                const raw = holdings.find((x) => x.id === h.id)
+                                if (raw) setEditingHolding(raw)
+                              }}
+                            />
                           </span>
                         </td>
                       </tr>
@@ -728,6 +902,7 @@ export default function Portfolio() {
       </div>
 
       <AddHoldingModal isOpen={addOpen} onClose={() => setAddOpen(false)} />
+      <EditHoldingModal key={editingHolding?.id} holding={editingHolding} onClose={() => setEditingHolding(null)} />
     </>
   )
 }

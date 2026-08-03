@@ -197,6 +197,73 @@ const docTemplate = `{
                 }
             }
         },
+        "/holdings/{id}": {
+            "patch": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "holdings"
+                ],
+                "summary": "Update an existing holding",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Holding ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Holding payload",
+                        "name": "holding",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/UpdateHoldingRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/Holding"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/uploads": {
             "post": {
                 "description": "Routes the file to a handler selected by file_type + account_type (currently: holdings + fidelity)",
@@ -554,7 +621,7 @@ const docTemplate = `{
                     "type": "number"
                 },
                 "id": {
-                    "type": "integer"
+                    "type": "string"
                 },
                 "price": {
                     "type": "number"
@@ -572,6 +639,41 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "UpdateHoldingRequest": {
+            "type": "object",
+            "properties": {
+                "asset_type": {
+                    "type": "string"
+                },
+                "average_cost_basis": {
+                    "type": "number"
+                },
+                "cost_basis_total": {
+                    "type": "number"
+                },
+                "current_value": {
+                    "type": "number"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "dividend_income": {
+                    "type": "number"
+                },
+                "last_price": {
+                    "type": "number"
+                },
+                "purchase_quantity": {
+                    "type": "number"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "symbol": {
                     "type": "string"
                 }
             }

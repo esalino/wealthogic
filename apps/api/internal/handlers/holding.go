@@ -12,6 +12,7 @@ import (
 type HoldingHandler interface {
 	GetHoldings(c *gin.Context)
 	CreateHolding(c *gin.Context)
+	UpdateHolding(c *gin.Context)
 }
 
 type holdingHandler struct {
@@ -83,6 +84,73 @@ func (h *holdingHandler) CreateHolding(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusCreated, holding)
+}
+
+type updateHoldingRequest struct {
+	AssetType        string  `json:"asset_type"`
+	Symbol           string  `json:"symbol"`
+	Description      string  `json:"description"`
+	Status           string  `json:"status"`
+	LastPrice        float64 `json:"last_price"`
+	Quantity         float64 `json:"purchase_quantity"`
+	CurrentValue     float64 `json:"current_value"`
+	AverageCostBasis float64 `json:"average_cost_basis"`
+	CostBasisTotal   float64 `json:"cost_basis_total"`
+	DividendIncome   float64 `json:"dividend_income"`
+} // @name UpdateHoldingRequest
+
+// UpdateHolding godoc
+// @Summary      Update an existing holding
+// @Tags         holdings
+// @Accept       json
+// @Produce      json
+// @Param        id       path      string                true  "Holding ID"
+// @Param        holding  body      updateHoldingRequest  true  "Holding payload"
+// @Success      200      {object}  models.Holding
+// @Failure      400      {object}  map[string]string
+// @Failure      404      {object}  map[string]string
+// @Failure      500      {object}  map[string]string
+// @Router       /holdings/{id} [patch]
+func (h *holdingHandler) UpdateHolding(c *gin.Context) {
+	id := c.Param("id")
+
+	var holding models.Holding
+	if err := h.db.First(&holding, "id = ?", id).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "holding not found"})
+		return
+	}
+
+	var req updateHoldingRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if req.AssetType != "" {
+		holding.AssetType = req.AssetType
+	}
+	if req.Symbol != "" {
+		holding.Symbol = req.Symbol
+	}
+	if req.Description != "" {
+		holding.Description = req.Description
+	}
+	if req.Status != "" {
+		holding.Status = req.Status
+	}
+	holding.LastPrice = req.LastPrice
+	holding.Quantity = req.Quantity
+	holding.CurrentValue = req.CurrentValue
+	holding.AverageCostBasis = req.AverageCostBasis
+	holding.CostBasisTotal = req.CostBasisTotal
+	holding.DividendIncome = req.DividendIncome
+
+	if err := h.db.Save(&holding).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update holding"})
+		return
+	}
+
+	c.JSON(http.StatusOK, holding)
 }
 
 // GetHoldings godoc
