@@ -1,6 +1,6 @@
 basePath: /
 definitions:
-  github_com_eriksalino_wealthogic_api_internal_models.Account:
+  Account:
     properties:
       account_name:
         type: string
@@ -16,18 +16,162 @@ definitions:
         type: string
       owners:
         items:
-          $ref: '#/definitions/github_com_eriksalino_wealthogic_api_internal_models.User'
+          $ref: '#/definitions/User'
         type: array
       tax_type:
         type: string
       transactions:
         items:
-          $ref: '#/definitions/github_com_eriksalino_wealthogic_api_internal_models.Transaction'
+          $ref: '#/definitions/Transaction'
         type: array
       updated_at:
         type: string
     type: object
-  github_com_eriksalino_wealthogic_api_internal_models.Transaction:
+  CreateAccountRequest:
+    properties:
+      account_name:
+        type: string
+      account_type:
+        type: string
+      balance:
+        type: number
+      default_cost_basis:
+        type: string
+      owner_ids:
+        items:
+          type: string
+        type: array
+      tax_type:
+        type: string
+    required:
+    - account_name
+    - account_type
+    type: object
+  CreateHoldingRequest:
+    properties:
+      asset_type:
+        type: string
+      average_cost_basis:
+        type: number
+      cost_basis_total:
+        type: number
+      current_value:
+        type: number
+      description:
+        type: string
+      dividend_income:
+        type: number
+      last_price:
+        type: number
+      purchase_quantity:
+        type: number
+      status:
+        type: string
+      symbol:
+        type: string
+    required:
+    - asset_type
+    - description
+    type: object
+  Holding:
+    properties:
+      asset_type:
+        type: string
+      average_cost_basis:
+        type: number
+      cost_basis_total:
+        type: number
+      created_at:
+        type: string
+      current_value:
+        type: number
+      description:
+        type: string
+      dividend_income:
+        type: number
+      gain_realized_amount:
+        type: number
+      gain_realized_percent:
+        type: number
+      gain_unrealized_amount:
+        type: number
+      gain_unrealized_percent:
+        type: number
+      id:
+        type: string
+      last_price:
+        type: number
+      purchase_quantity:
+        type: number
+      status:
+        type: string
+      symbol:
+        type: string
+      tax_lots:
+        items:
+          $ref: '#/definitions/TaxLot'
+        type: array
+      updated_at:
+        type: string
+    type: object
+  PaginatedAccounts:
+    properties:
+      data:
+        items:
+          $ref: '#/definitions/Account'
+        type: array
+      page:
+        type: integer
+      page_size:
+        type: integer
+      total:
+        type: integer
+    type: object
+  PaginatedHoldings:
+    properties:
+      data:
+        items:
+          $ref: '#/definitions/Holding'
+        type: array
+      page:
+        type: integer
+      page_size:
+        type: integer
+      total:
+        type: integer
+    type: object
+  TaxLot:
+    properties:
+      account_id:
+        type: string
+      asset_description:
+        type: string
+      asset_type:
+        type: string
+      created_at:
+        type: string
+      holding_id:
+        description: |-
+          HoldingID is nil until a matching Holding exists to link to - imported
+          transactions and holdings come from separate Fidelity exports and may
+          not arrive in the same order.
+        type: string
+      id:
+        type: string
+      purchase_date:
+        type: string
+      purchase_price:
+        type: number
+      purchase_quantity:
+        type: number
+      remaining_quantity:
+        type: number
+      symbol:
+        type: string
+      updated_at:
+        type: string
+    type: object
+  Transaction:
     properties:
       account_id:
         type: string
@@ -62,7 +206,16 @@ definitions:
       updated_at:
         type: string
     type: object
-  github_com_eriksalino_wealthogic_api_internal_models.User:
+  UploadResult:
+    properties:
+      created:
+        type: integer
+      skipped:
+        type: integer
+      updated:
+        type: integer
+    type: object
+  User:
     properties:
       created_at:
         type: string
@@ -74,48 +227,6 @@ definitions:
         type: string
       updated_at:
         type: string
-    type: object
-  github_com_eriksalino_wealthogic_api_internal_uploads.Result:
-    properties:
-      created:
-        type: integer
-      skipped:
-        type: integer
-      updated:
-        type: integer
-    type: object
-  internal_handlers.createAccountRequest:
-    properties:
-      account_name:
-        type: string
-      account_type:
-        type: string
-      balance:
-        type: number
-      default_cost_basis:
-        type: string
-      owner_ids:
-        items:
-          type: string
-        type: array
-      tax_type:
-        type: string
-    required:
-    - account_name
-    - account_type
-    type: object
-  internal_handlers.paginatedAccounts:
-    properties:
-      data:
-        items:
-          $ref: '#/definitions/github_com_eriksalino_wealthogic_api_internal_models.Account'
-        type: array
-      page:
-        type: integer
-      page_size:
-        type: integer
-      total:
-        type: integer
     type: object
 host: localhost:8080
 info:
@@ -141,7 +252,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/internal_handlers.paginatedAccounts'
+            $ref: '#/definitions/PaginatedAccounts'
         "500":
           description: Internal Server Error
           schema:
@@ -160,14 +271,14 @@ paths:
         name: account
         required: true
         schema:
-          $ref: '#/definitions/internal_handlers.createAccountRequest'
+          $ref: '#/definitions/CreateAccountRequest'
       produces:
       - application/json
       responses:
         "201":
           description: Created
           schema:
-            $ref: '#/definitions/github_com_eriksalino_wealthogic_api_internal_models.Account'
+            $ref: '#/definitions/Account'
         "400":
           description: Bad Request
           schema:
@@ -183,6 +294,65 @@ paths:
       summary: Create a new account
       tags:
       - accounts
+  /holdings:
+    get:
+      parameters:
+      - description: Page number (default 1)
+        in: query
+        name: page
+        type: integer
+      - description: Items per page (default 20, max 100)
+        in: query
+        name: page_size
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/PaginatedHoldings'
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: List holdings with pagination
+      tags:
+      - holdings
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Holding payload
+        in: body
+        name: holding
+        required: true
+        schema:
+          $ref: '#/definitions/CreateHoldingRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/Holding'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Create a new holding
+      tags:
+      - holdings
   /uploads:
     post:
       consumes:
@@ -215,7 +385,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/github_com_eriksalino_wealthogic_api_internal_uploads.Result'
+            $ref: '#/definitions/UploadResult'
         "400":
           description: Bad Request
           schema:

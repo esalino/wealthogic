@@ -30,4 +30,4 @@ type TaxLot struct {
 	// not arrive in the same order.
 	HoldingID *uuid.UUID `gorm:"type:uuid" json:"holding_id"`
 	AccountID uuid.UUID  `gorm:"type:uuid" json:"account_id"`
-}
+} // @name TaxLot

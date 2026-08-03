@@ -7,6 +7,7 @@ import (
 	"gorm.io/gorm"
 )
 
+// Transaction represents a single account transaction.
 type Transaction struct {
 	ID        int64          `gorm:"primaryKey;autoIncrement" json:"id"`
 	CreatedAt time.Time      `json:"created_at"`
@@ -31,4 +32,4 @@ type Transaction struct {
 	RealizedGains float64 `json:"realized_gains"`
 
 	AccountID uuid.UUID `gorm:"type:uuid" json:"account_id"`
-}
+} // @name Transaction

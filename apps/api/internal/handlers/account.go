@@ -31,14 +31,14 @@ type createAccountRequest struct {
 	DefaultCostBasis string      `json:"default_cost_basis"`
 	Balance          float64     `json:"balance"`
 	OwnerIDs         []uuid.UUID `json:"owner_ids"`
-}
+} // @name CreateAccountRequest
 
 type paginatedAccounts struct {
 	Data     []models.Account `json:"data"`
 	Total    int64            `json:"total"`
 	Page     int              `json:"page"`
 	PageSize int              `json:"page_size"`
-}
+} // @name PaginatedAccounts
 
 // CreateAccount godoc
 // @Summary      Create a new account

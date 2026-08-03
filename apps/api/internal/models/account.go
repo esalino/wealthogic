@@ -7,6 +7,7 @@ import (
 	"gorm.io/gorm"
 )
 
+// Account represents a brokerage or bank account.
 type Account struct {
 	ID               uuid.UUID      `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
 	CreatedAt        time.Time      `json:"created_at"`
@@ -20,4 +21,4 @@ type Account struct {
 
 	Transactions []Transaction `json:"transactions,omitempty"`
 	Owners       []User        `gorm:"many2many:account_owners;"                       json:"owners,omitempty"`
-}
+} // @name Account

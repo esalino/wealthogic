@@ -31,6 +31,7 @@ func main() {
 	}
 
 	accountHandler := handlers.NewAccountHandler(database)
+	holdingHandler := handlers.NewHoldingHandler(database)
 	userHandler := handlers.NewUserHandler(database)
 	uploadHandler := handlers.NewUploadHandler(database)
 
@@ -54,6 +55,8 @@ func main() {
 	r.GET("/accounts", accountHandler.GetAccounts)
 	r.POST("/accounts", accountHandler.CreateAccount)
 	r.PATCH("/accounts/:id", accountHandler.UpdateAccount)
+	r.GET("/holdings", holdingHandler.GetHoldings)
+	r.POST("/holdings", holdingHandler.CreateHolding)
 	r.GET("/users", userHandler.GetUsers)
 	r.POST("/uploads", uploadHandler.Upload)
 

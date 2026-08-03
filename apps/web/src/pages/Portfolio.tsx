@@ -1,4 +1,6 @@
 import { Fragment, useState, useEffect } from 'react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { createHolding, getHoldings, type Holding as ApiHolding } from '../api/holdings'
 
 type ChangeDirection = 'positive' | 'negative' | 'neutral'
 
@@ -26,6 +28,7 @@ interface Dividend {
 }
 
 interface Holding {
+  id: string
   symbol: string
   assetClass: string
   price: string
@@ -44,128 +47,47 @@ interface Holding {
   dividends: Dividend[]
 }
 
-// fillerHolding builds a placeholder holding with no sub-records, used only to
-// pad the hardcoded list out enough to demonstrate pagination.
-function fillerHolding(h: Omit<Holding, 'taxLots' | 'transactions' | 'dividends'>): Holding {
-  return { ...h, taxLots: [], transactions: [], dividends: [] }
+const fmtCurrency = (n: number) =>
+  (n ?? 0).toLocaleString('en-US', { style: 'currency', currency: 'USD' })
+
+const fmtNumber = (n: number) =>
+  (n ?? 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+
+function fmtSignedCurrency(n: number) {
+  const v = n ?? 0
+  return `${v < 0 ? '-' : '+'}${fmtCurrency(Math.abs(v))}`
 }
 
-const holdings: Holding[] = [
-  {
-    symbol: 'AAPL',
-    assetClass: 'Technology',
-    price: '$189.43',
-    quantity: '1,240.00',
-    marketValue: '$234,893.20',
-    allocation: '9.46%',
-    averageCostBasis: '$182.56',
-    costBasisTotal: '$226,370.00',
-    gainUnrealizedPercent: '+3.77%',
-    gainUnrealizedAmount: '+$8,523.20',
-    gainRealizedPercent: '+2.10%',
-    gainRealizedAmount: '+$1,204.50',
-    dividendIncome: '$607.60',
-    taxLots: [
-      { dateAcquired: 'Oct 12, 2023', quantity: '500.00', costBasis: '$178.20', currentValue: '$94,715.00' },
-      { dateAcquired: 'Jan 15, 2024', quantity: '740.00', costBasis: '$185.50', currentValue: '$140,178.20' },
-    ],
-    transactions: [
-      { date: 'Jan 15, 2024', action: 'Buy', quantity: '740.00', price: '$185.50', amount: '-$137,270.00', amountDir: 'negative' },
-      { date: 'Oct 12, 2023', action: 'Buy', quantity: '500.00', price: '$178.20', amount: '-$89,100.00', amountDir: 'negative' },
-    ],
-    dividends: [
-      { date: 'May 16, 2024', perShare: '$0.25', shares: '1,240.00', total: '$310.00' },
-      { date: 'Feb 15, 2024', perShare: '$0.24', shares: '1,240.00', total: '$297.60' },
-    ],
-  },
-  {
-    symbol: 'MSFT',
-    assetClass: 'Technology',
-    price: '$415.10',
-    quantity: '480.00',
-    marketValue: '$199,248.00',
-    allocation: '8.02%',
-    averageCostBasis: '$285.30',
-    costBasisTotal: '$136,942.00',
-    gainUnrealizedPercent: '+45.50%',
-    gainUnrealizedAmount: '+$62,306.00',
-    gainRealizedPercent: '+3.10%',
-    gainRealizedAmount: '+$2,450.00',
-    dividendIncome: '$720.00',
-    taxLots: [
-      { dateAcquired: 'Mar 03, 2023', quantity: '280.00', costBasis: '$255.40', currentValue: '$116,228.00' },
-      { dateAcquired: 'Aug 21, 2023', quantity: '200.00', costBasis: '$327.15', currentValue: '$83,020.00' },
-    ],
-    transactions: [
-      { date: 'Aug 21, 2023', action: 'Buy', quantity: '200.00', price: '$327.15', amount: '-$65,430.00', amountDir: 'negative' },
-      { date: 'Mar 03, 2023', action: 'Buy', quantity: '280.00', price: '$255.40', amount: '-$71,512.00', amountDir: 'negative' },
-    ],
-    dividends: [
-      { date: 'Jun 13, 2024', perShare: '$0.75', shares: '480.00', total: '$360.00' },
-      { date: 'Mar 14, 2024', perShare: '$0.75', shares: '480.00', total: '$360.00' },
-    ],
-  },
-  {
-    symbol: 'VTI',
-    assetClass: 'ETF • Diversified',
-    price: '$252.18',
-    quantity: '3,500.00',
-    marketValue: '$882,630.00',
-    allocation: '35.56%',
-    averageCostBasis: '$217.94',
-    costBasisTotal: '$762,800.00',
-    gainUnrealizedPercent: '+15.71%',
-    gainUnrealizedAmount: '+$119,830.00',
-    gainRealizedPercent: '+2.40%',
-    gainRealizedAmount: '+$5,600.00',
-    dividendIncome: '$5,950.00',
-    taxLots: [
-      { dateAcquired: 'Jan 04, 2022', quantity: '2,000.00', costBasis: '$221.05', currentValue: '$504,360.00' },
-      { dateAcquired: 'Jul 19, 2023', quantity: '1,500.00', costBasis: '$213.80', currentValue: '$378,270.00' },
-    ],
-    transactions: [
-      { date: 'Jul 19, 2023', action: 'Buy', quantity: '1,500.00', price: '$213.80', amount: '-$320,700.00', amountDir: 'negative' },
-      { date: 'Jan 04, 2022', action: 'Buy', quantity: '2,000.00', price: '$221.05', amount: '-$442,100.00', amountDir: 'negative' },
-    ],
-    dividends: [
-      { date: 'Jun 27, 2024', perShare: '$0.88', shares: '3,500.00', total: '$3,080.00' },
-      { date: 'Mar 26, 2024', perShare: '$0.82', shares: '3,500.00', total: '$2,870.00' },
-    ],
-  },
-  {
-    symbol: 'BND',
-    assetClass: 'Fixed Income',
-    price: '$72.45',
-    quantity: '6,845.00',
-    marketValue: '$495,920.25',
-    allocation: '19.98%',
-    averageCostBasis: '$78.90',
-    costBasisTotal: '$540,070.50',
-    gainUnrealizedPercent: '-8.18%',
-    gainUnrealizedAmount: '-$44,150.25',
-    gainRealizedPercent: '-0.15%',
-    gainRealizedAmount: '-$820.00',
-    dividendIncome: '$2,601.10',
-    taxLots: [
-      { dateAcquired: 'Feb 11, 2022', quantity: '6,845.00', costBasis: '$78.90', currentValue: '$495,920.25' },
-    ],
-    transactions: [
-      { date: 'Feb 11, 2022', action: 'Buy', quantity: '6,845.00', price: '$78.90', amount: '-$540,070.50', amountDir: 'negative' },
-    ],
-    dividends: [
-      { date: 'Jul 01, 2024', perShare: '$0.19', shares: '6,845.00', total: '$1,300.55' },
-      { date: 'Jun 03, 2024', perShare: '$0.19', shares: '6,845.00', total: '$1,300.55' },
-    ],
-  },
-  fillerHolding({ symbol: 'GOOGL', assetClass: 'Technology', price: '$178.20', quantity: '850.00', marketValue: '$151,470.00', allocation: '6.10%', averageCostBasis: '$120.50', costBasisTotal: '$102,425.00', gainUnrealizedAmount: '+$49,045.00', gainUnrealizedPercent: '+47.88%', gainRealizedAmount: '+$0.00', gainRealizedPercent: '0.00%', dividendIncome: '$0.00' }),
-  fillerHolding({ symbol: 'AMZN', assetClass: 'Consumer Discretionary', price: '$198.40', quantity: '620.00', marketValue: '$123,008.00', allocation: '4.96%', averageCostBasis: '$145.30', costBasisTotal: '$90,086.00', gainUnrealizedAmount: '+$32,922.00', gainUnrealizedPercent: '+36.54%', gainRealizedAmount: '+$0.00', gainRealizedPercent: '0.00%', dividendIncome: '$0.00' }),
-  fillerHolding({ symbol: 'NVDA', assetClass: 'Technology', price: '$121.85', quantity: '1,100.00', marketValue: '$134,035.00', allocation: '5.40%', averageCostBasis: '$65.40', costBasisTotal: '$71,940.00', gainUnrealizedAmount: '+$62,095.00', gainUnrealizedPercent: '+86.32%', gainRealizedAmount: '+$1,850.00', gainRealizedPercent: '+2.57%', dividendIncome: '$44.00' }),
-  fillerHolding({ symbol: 'TSLA', assetClass: 'Consumer Discretionary', price: '$242.10', quantity: '400.00', marketValue: '$96,840.00', allocation: '3.90%', averageCostBasis: '$275.60', costBasisTotal: '$110,240.00', gainUnrealizedAmount: '-$13,400.00', gainUnrealizedPercent: '-12.16%', gainRealizedAmount: '-$2,300.00', gainRealizedPercent: '-2.09%', dividendIncome: '$0.00' }),
-  fillerHolding({ symbol: 'JPM', assetClass: 'Financial Services', price: '$198.75', quantity: '500.00', marketValue: '$99,375.00', allocation: '4.00%', averageCostBasis: '$150.20', costBasisTotal: '$75,100.00', gainUnrealizedAmount: '+$24,275.00', gainUnrealizedPercent: '+32.32%', gainRealizedAmount: '+$900.00', gainRealizedPercent: '+1.20%', dividendIncome: '$1,050.00' }),
-  fillerHolding({ symbol: 'JNJ', assetClass: 'Healthcare', price: '$158.30', quantity: '700.00', marketValue: '$110,810.00', allocation: '4.46%', averageCostBasis: '$162.10', costBasisTotal: '$113,470.00', gainUnrealizedAmount: '-$2,660.00', gainUnrealizedPercent: '-2.34%', gainRealizedAmount: '+$0.00', gainRealizedPercent: '0.00%', dividendIncome: '$2,380.00' }),
-  fillerHolding({ symbol: 'XOM', assetClass: 'Energy', price: '$114.60', quantity: '900.00', marketValue: '$103,140.00', allocation: '4.15%', averageCostBasis: '$98.75', costBasisTotal: '$88,875.00', gainUnrealizedAmount: '+$14,265.00', gainUnrealizedPercent: '+16.05%', gainRealizedAmount: '+$1,200.00', gainRealizedPercent: '+1.35%', dividendIncome: '$3,285.00' }),
-  fillerHolding({ symbol: 'KO', assetClass: 'Consumer Staples', price: '$61.45', quantity: '1,500.00', marketValue: '$92,175.00', allocation: '3.71%', averageCostBasis: '$52.80', costBasisTotal: '$79,200.00', gainUnrealizedAmount: '+$12,975.00', gainUnrealizedPercent: '+16.38%', gainRealizedAmount: '+$450.00', gainRealizedPercent: '+0.57%', dividendIncome: '$2,760.00' }),
-]
+function fmtPercent(n: number) {
+  const v = n ?? 0
+  return `${v >= 0 ? '+' : ''}${v.toFixed(2)}%`
+}
+
+// toViewHolding maps an API holding into the display shape used by the table.
+// Sub-records (tax lots, transactions, dividends) are intentionally empty for
+// now — they'll be lazy-loaded when a row is expanded.
+function toViewHolding(h: ApiHolding, totalMarketValue: number): Holding {
+  const allocation = totalMarketValue > 0 ? (h.current_value / totalMarketValue) * 100 : 0
+  return {
+    id: h.id,
+    symbol: h.symbol || '—',
+    assetClass: h.asset_type || h.description || '',
+    price: fmtCurrency(h.last_price),
+    quantity: fmtNumber(h.purchase_quantity),
+    marketValue: fmtCurrency(h.current_value),
+    allocation: `${allocation.toFixed(2)}%`,
+    averageCostBasis: fmtCurrency(h.average_cost_basis),
+    costBasisTotal: fmtCurrency(h.cost_basis_total),
+    gainUnrealizedPercent: fmtPercent(h.gain_unrealized_percent),
+    gainUnrealizedAmount: fmtSignedCurrency(h.gain_unrealized_amount),
+    gainRealizedPercent: fmtPercent(h.gain_realized_percent),
+    gainRealizedAmount: fmtSignedCurrency(h.gain_realized_amount),
+    dividendIncome: fmtCurrency(h.dividend_income),
+    taxLots: [],
+    transactions: [],
+    dividends: [],
+  }
+}
 
 const subTabs = ['Tax Lots', 'Transactions', 'Dividends'] as const
 type SubTab = (typeof subTabs)[number]
@@ -350,30 +272,207 @@ const sectors: Sector[] = [
   { label: 'Others', pct: 16.0 },
 ]
 
+const ASSET_TYPES = ['Stock', 'ETF', 'Mutual Fund', 'Bond', 'Money Market', 'Crypto', 'Other']
+
+// ── Add holding modal ─────────────────────────────────────────────────────────
+
+function AddHoldingModal({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) {
+  const queryClient = useQueryClient()
+  const [assetType, setAssetType] = useState('Stock')
+  const [symbol, setSymbol] = useState('')
+  const [description, setDescription] = useState('')
+  const [quantity, setQuantity] = useState('')
+  const [lastPrice, setLastPrice] = useState('')
+  const [avgCostBasis, setAvgCostBasis] = useState('')
+  const [dividendIncome, setDividendIncome] = useState('')
+
+  const { mutate, isPending, error, reset } = useMutation({
+    mutationFn: createHolding,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['holdings'] })
+      setAssetType('Stock'); setSymbol(''); setDescription('')
+      setQuantity(''); setLastPrice(''); setAvgCostBasis(''); setDividendIncome('')
+      reset(); onClose()
+    },
+  })
+
+  if (!isOpen) return null
+
+  const inputCls = 'w-full px-3 py-2.5 bg-surface-container-low border border-outline-variant rounded-lg text-body-md text-on-surface placeholder:text-on-surface-variant focus:outline-none focus:ring-2 focus:ring-secondary/30 focus:border-secondary transition-colors'
+  const numInputCls = `${inputCls} tabular-nums`
+
+  function submit() {
+    const qty = parseFloat(quantity) || 0
+    const price = parseFloat(lastPrice) || 0
+    const avgCost = parseFloat(avgCostBasis) || 0
+    mutate({
+      asset_type: assetType,
+      symbol: symbol.trim(),
+      description: description.trim(),
+      last_price: price,
+      purchase_quantity: qty,
+      // current_value and cost_basis_total are derived from the entered
+      // quantity, price, and average cost rather than asked for directly.
+      current_value: price * qty,
+      average_cost_basis: avgCost,
+      cost_basis_total: avgCost * qty,
+      dividend_income: parseFloat(dividendIncome) || 0,
+    })
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4" onClick={onClose}>
+      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" />
+      <div
+        className="relative bg-surface-container-lowest rounded-xl shadow-card w-full max-w-md p-6"
+        onClick={(e) => e.stopPropagation()}
+        style={{ animation: 'slideUp 0.25s ease-out' }}
+      >
+        <div className="flex items-center justify-between mb-6">
+          <h2 className="text-headline-sm text-on-surface">Add Holding</h2>
+          <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-lg text-on-surface-variant hover:bg-surface-container-high transition-colors">
+            <span className="material-symbols-outlined text-xl">close</span>
+          </button>
+        </div>
+
+        <div className="space-y-4">
+          <div>
+            <label className="block text-label-sm font-semibold text-on-surface mb-1.5">Symbol</label>
+            <input
+              type="text"
+              value={symbol}
+              onChange={(e) => setSymbol(e.target.value)}
+              placeholder="e.g. AAPL"
+              className={inputCls}
+            />
+          </div>
+
+          <div>
+            <label className="block text-label-sm font-semibold text-on-surface mb-1.5">Description</label>
+            <input
+              type="text"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="e.g. Apple Inc."
+              className={inputCls}
+            />
+          </div>
+
+          <div>
+            <label className="block text-label-sm font-semibold text-on-surface mb-1.5">Asset Type</label>
+            <select value={assetType} onChange={(e) => setAssetType(e.target.value)} className={inputCls}>
+              {ASSET_TYPES.map((t) => <option key={t}>{t}</option>)}
+            </select>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-label-sm font-semibold text-on-surface mb-1.5">Quantity</label>
+              <input
+                type="number"
+                value={quantity}
+                onChange={(e) => setQuantity(e.target.value)}
+                placeholder="0.00"
+                className={numInputCls}
+              />
+            </div>
+            <div>
+              <label className="block text-label-sm font-semibold text-on-surface mb-1.5">Last Price</label>
+              <div className="relative">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-body-md text-on-surface-variant">$</span>
+                <input
+                  type="number"
+                  value={lastPrice}
+                  onChange={(e) => setLastPrice(e.target.value)}
+                  placeholder="0.00"
+                  className={`${numInputCls} pl-7`}
+                />
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-label-sm font-semibold text-on-surface mb-1.5">Avg Cost Basis</label>
+              <div className="relative">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-body-md text-on-surface-variant">$</span>
+                <input
+                  type="number"
+                  value={avgCostBasis}
+                  onChange={(e) => setAvgCostBasis(e.target.value)}
+                  placeholder="0.00"
+                  className={`${numInputCls} pl-7`}
+                />
+              </div>
+            </div>
+            <div>
+              <label className="block text-label-sm font-semibold text-on-surface mb-1.5">Dividend Income</label>
+              <div className="relative">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-body-md text-on-surface-variant">$</span>
+                <input
+                  type="number"
+                  value={dividendIncome}
+                  onChange={(e) => setDividendIncome(e.target.value)}
+                  placeholder="0.00"
+                  className={`${numInputCls} pl-7`}
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {error && <p className="mt-4 text-body-sm text-error">{(error as Error).message}</p>}
+
+        <div className="flex gap-3 mt-6">
+          <button onClick={onClose} disabled={isPending} className="flex-1 px-4 py-2.5 border border-outline-variant rounded-lg text-body-md text-on-surface hover:bg-surface-container-high transition-colors disabled:opacity-50">
+            Cancel
+          </button>
+          <button
+            onClick={submit}
+            disabled={isPending || !description.trim()}
+            className="flex-1 px-4 py-2.5 bg-primary text-on-primary rounded-lg text-body-md font-semibold hover:opacity-90 transition-opacity disabled:opacity-50"
+          >
+            {isPending ? 'Saving…' : 'Add Holding'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default function Portfolio() {
   const [mounted, setMounted] = useState(false)
   const [sortBy, setSortBy] = useState('Market Value High to Low')
-  const [expandedSymbol, setExpandedSymbol] = useState<string | null>('AAPL')
+  const [expandedId, setExpandedId] = useState<string | null>(null)
   const [activeTab, setActiveTab] = useState<SubTab>('Tax Lots')
   const [pagination, setPagination] = useState({ pageIndex: 0, pageSize: 10 })
+  const [addOpen, setAddOpen] = useState(false)
+
+  const { data, isLoading, isError, error } = useQuery({
+    queryKey: ['holdings', pagination.pageIndex, pagination.pageSize],
+    queryFn: () => getHoldings(pagination.pageIndex + 1, pagination.pageSize),
+  })
 
   useEffect(() => {
     const t1 = setTimeout(() => setMounted(true), 100)
     return () => clearTimeout(t1)
   }, [])
 
-  function toggleRow(symbol: string) {
-    if (expandedSymbol === symbol) {
-      setExpandedSymbol(null)
+  function toggleRow(id: string) {
+    if (expandedId === id) {
+      setExpandedId(null)
     } else {
-      setExpandedSymbol(symbol)
+      setExpandedId(id)
       setActiveTab('Tax Lots')
     }
   }
 
-  const pageCount = Math.max(1, Math.ceil(holdings.length / pagination.pageSize))
-  const pageStart = pagination.pageIndex * pagination.pageSize
-  const pageHoldings = holdings.slice(pageStart, pageStart + pagination.pageSize)
+  const holdings = data?.data ?? []
+  // Allocation is computed relative to the market value of the holdings on the
+  // current page — a stand-in until a portfolio-total endpoint exists.
+  const totalMarketValue = holdings.reduce((sum, h) => sum + (h.current_value ?? 0), 0)
+  const pageHoldings = holdings.map((h) => toViewHolding(h, totalMarketValue))
+  const pageCount = Math.max(1, Math.ceil((data?.total ?? 0) / pagination.pageSize))
   const canPrev = pagination.pageIndex > 0
   const canNext = pagination.pageIndex < pageCount - 1
 
@@ -487,7 +586,10 @@ export default function Portfolio() {
                 <option>Performance 24h</option>
                 <option>Asset Class</option>
               </select>
-              <button className="flex items-center gap-1.5 px-4 py-1.5 bg-primary text-on-primary rounded-lg text-body-md font-semibold hover:opacity-90 transition-opacity">
+              <button
+                onClick={() => setAddOpen(true)}
+                className="flex items-center gap-1.5 px-4 py-1.5 bg-primary text-on-primary rounded-lg text-body-md font-semibold hover:opacity-90 transition-opacity"
+              >
                 <span className="material-symbols-outlined text-lg">add</span>
                 Add Holding
               </button>
@@ -510,12 +612,33 @@ export default function Portfolio() {
                 </tr>
               </thead>
               <tbody>
-                {pageHoldings.map((h) => {
-                  const expanded = expandedSymbol === h.symbol
+                {isLoading && (
+                  <tr>
+                    <td colSpan={10} className="px-4 py-10 text-center text-body-md text-on-surface-variant">
+                      Loading holdings…
+                    </td>
+                  </tr>
+                )}
+                {!isLoading && isError && (
+                  <tr>
+                    <td colSpan={10} className="px-4 py-10 text-center text-body-md text-error">
+                      {error instanceof Error ? error.message : 'Failed to load holdings'}
+                    </td>
+                  </tr>
+                )}
+                {!isLoading && !isError && pageHoldings.length === 0 && (
+                  <tr>
+                    <td colSpan={10} className="px-4 py-10 text-center text-body-md text-on-surface-variant">
+                      No holdings yet.
+                    </td>
+                  </tr>
+                )}
+                {!isLoading && !isError && pageHoldings.map((h) => {
+                  const expanded = expandedId === h.id
                   return (
-                    <Fragment key={h.symbol}>
+                    <Fragment key={h.id}>
                       <tr
-                        onClick={() => toggleRow(h.symbol)}
+                        onClick={() => toggleRow(h.id)}
                         className="group border-b border-outline-variant hover:bg-surface-container-low transition-colors cursor-pointer"
                       >
                         <td className="px-4 py-4">
@@ -603,6 +726,8 @@ export default function Portfolio() {
           </div>
         </div>
       </div>
+
+      <AddHoldingModal isOpen={addOpen} onClose={() => setAddOpen(false)} />
     </>
   )
 }

@@ -13,7 +13,7 @@ type Result struct {
 	Created int `json:"created"`
 	Updated int `json:"updated"`
 	Skipped int `json:"skipped"`
-}
+} // @name UploadResult
 
 // Options carries request-level context a handler may need beyond the file
 // itself, e.g. which account transactions should be tied to.

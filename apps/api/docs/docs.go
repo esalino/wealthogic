@@ -42,7 +42,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/internal_handlers.paginatedAccounts"
+                            "$ref": "#/definitions/PaginatedAccounts"
                         }
                     },
                     "500": {
@@ -74,7 +74,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_handlers.createAccountRequest"
+                            "$ref": "#/definitions/CreateAccountRequest"
                         }
                     }
                 ],
@@ -82,7 +82,98 @@ const docTemplate = `{
                     "201": {
                         "description": "Created",
                         "schema": {
-                            "$ref": "#/definitions/github_com_eriksalino_wealthogic_api_internal_models.Account"
+                            "$ref": "#/definitions/Account"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/holdings": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "holdings"
+                ],
+                "summary": "List holdings with pagination",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Page number (default 1)",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Items per page (default 20, max 100)",
+                        "name": "page_size",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/PaginatedHoldings"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            },
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "holdings"
+                ],
+                "summary": "Create a new holding",
+                "parameters": [
+                    {
+                        "description": "Holding payload",
+                        "name": "holding",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/CreateHoldingRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/Holding"
                         }
                     },
                     "400": {
@@ -152,7 +243,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/github_com_eriksalino_wealthogic_api_internal_uploads.Result"
+                            "$ref": "#/definitions/UploadResult"
                         }
                     },
                     "400": {
@@ -178,7 +269,7 @@ const docTemplate = `{
         }
     },
     "definitions": {
-        "github_com_eriksalino_wealthogic_api_internal_models.Account": {
+        "Account": {
             "type": "object",
             "properties": {
                 "account_name": {
@@ -202,7 +293,7 @@ const docTemplate = `{
                 "owners": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/github_com_eriksalino_wealthogic_api_internal_models.User"
+                        "$ref": "#/definitions/User"
                     }
                 },
                 "tax_type": {
@@ -211,7 +302,7 @@ const docTemplate = `{
                 "transactions": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/github_com_eriksalino_wealthogic_api_internal_models.Transaction"
+                        "$ref": "#/definitions/Transaction"
                     }
                 },
                 "updated_at": {
@@ -219,7 +310,220 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_eriksalino_wealthogic_api_internal_models.Transaction": {
+        "CreateAccountRequest": {
+            "type": "object",
+            "required": [
+                "account_name",
+                "account_type"
+            ],
+            "properties": {
+                "account_name": {
+                    "type": "string"
+                },
+                "account_type": {
+                    "type": "string"
+                },
+                "balance": {
+                    "type": "number"
+                },
+                "default_cost_basis": {
+                    "type": "string"
+                },
+                "owner_ids": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "tax_type": {
+                    "type": "string"
+                }
+            }
+        },
+        "CreateHoldingRequest": {
+            "type": "object",
+            "required": [
+                "asset_type",
+                "description"
+            ],
+            "properties": {
+                "asset_type": {
+                    "type": "string"
+                },
+                "average_cost_basis": {
+                    "type": "number"
+                },
+                "cost_basis_total": {
+                    "type": "number"
+                },
+                "current_value": {
+                    "type": "number"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "dividend_income": {
+                    "type": "number"
+                },
+                "last_price": {
+                    "type": "number"
+                },
+                "purchase_quantity": {
+                    "type": "number"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "symbol": {
+                    "type": "string"
+                }
+            }
+        },
+        "Holding": {
+            "type": "object",
+            "properties": {
+                "asset_type": {
+                    "type": "string"
+                },
+                "average_cost_basis": {
+                    "type": "number"
+                },
+                "cost_basis_total": {
+                    "type": "number"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "current_value": {
+                    "type": "number"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "dividend_income": {
+                    "type": "number"
+                },
+                "gain_realized_amount": {
+                    "type": "number"
+                },
+                "gain_realized_percent": {
+                    "type": "number"
+                },
+                "gain_unrealized_amount": {
+                    "type": "number"
+                },
+                "gain_unrealized_percent": {
+                    "type": "number"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "last_price": {
+                    "type": "number"
+                },
+                "purchase_quantity": {
+                    "type": "number"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "symbol": {
+                    "type": "string"
+                },
+                "tax_lots": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/TaxLot"
+                    }
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "PaginatedAccounts": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/Account"
+                    }
+                },
+                "page": {
+                    "type": "integer"
+                },
+                "page_size": {
+                    "type": "integer"
+                },
+                "total": {
+                    "type": "integer"
+                }
+            }
+        },
+        "PaginatedHoldings": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/Holding"
+                    }
+                },
+                "page": {
+                    "type": "integer"
+                },
+                "page_size": {
+                    "type": "integer"
+                },
+                "total": {
+                    "type": "integer"
+                }
+            }
+        },
+        "TaxLot": {
+            "type": "object",
+            "properties": {
+                "account_id": {
+                    "type": "string"
+                },
+                "asset_description": {
+                    "type": "string"
+                },
+                "asset_type": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "holding_id": {
+                    "description": "HoldingID is nil until a matching Holding exists to link to - imported\ntransactions and holdings come from separate Fidelity exports and may\nnot arrive in the same order.",
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "purchase_date": {
+                    "type": "string"
+                },
+                "purchase_price": {
+                    "type": "number"
+                },
+                "purchase_quantity": {
+                    "type": "number"
+                },
+                "remaining_quantity": {
+                    "type": "number"
+                },
+                "symbol": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "Transaction": {
             "type": "object",
             "properties": {
                 "account_id": {
@@ -272,7 +576,21 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_eriksalino_wealthogic_api_internal_models.User": {
+        "UploadResult": {
+            "type": "object",
+            "properties": {
+                "created": {
+                    "type": "integer"
+                },
+                "skipped": {
+                    "type": "integer"
+                },
+                "updated": {
+                    "type": "integer"
+                }
+            }
+        },
+        "User": {
             "type": "object",
             "properties": {
                 "created_at": {
@@ -289,70 +607,6 @@ const docTemplate = `{
                 },
                 "updated_at": {
                     "type": "string"
-                }
-            }
-        },
-        "github_com_eriksalino_wealthogic_api_internal_uploads.Result": {
-            "type": "object",
-            "properties": {
-                "created": {
-                    "type": "integer"
-                },
-                "skipped": {
-                    "type": "integer"
-                },
-                "updated": {
-                    "type": "integer"
-                }
-            }
-        },
-        "internal_handlers.createAccountRequest": {
-            "type": "object",
-            "required": [
-                "account_name",
-                "account_type"
-            ],
-            "properties": {
-                "account_name": {
-                    "type": "string"
-                },
-                "account_type": {
-                    "type": "string"
-                },
-                "balance": {
-                    "type": "number"
-                },
-                "default_cost_basis": {
-                    "type": "string"
-                },
-                "owner_ids": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                },
-                "tax_type": {
-                    "type": "string"
-                }
-            }
-        },
-        "internal_handlers.paginatedAccounts": {
-            "type": "object",
-            "properties": {
-                "data": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/github_com_eriksalino_wealthogic_api_internal_models.Account"
-                    }
-                },
-                "page": {
-                    "type": "integer"
-                },
-                "page_size": {
-                    "type": "integer"
-                },
-                "total": {
-                    "type": "integer"
                 }
             }
         }

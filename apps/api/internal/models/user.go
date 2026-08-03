@@ -7,6 +7,7 @@ import (
 	"gorm.io/gorm"
 )
 
+// User represents an account owner.
 type User struct {
 	ID        uuid.UUID      `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
 	CreatedAt time.Time      `json:"created_at"`
@@ -14,4 +15,4 @@ type User struct {
 	DeletedAt gorm.DeletedAt `gorm:"index"                                          json:"-"`
 	FirstName string         `gorm:"not null"                                       json:"first_name"`
 	LastName  string         `gorm:"not null"                                       json:"last_name"`
-}
+} // @name User
