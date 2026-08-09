@@ -20,7 +20,7 @@ type TaxLot struct {
 	Symbol           string `json:"symbol"`
 	AssetDescription string `gorm:"not null"  json:"asset_description"`
 
-	PurchaseDate      time.Time `gorm:"not null"  json:"purchase_date"`
+	PurchaseDate      time.Time `gorm:"not null;type:date" json:"purchase_date"`
 	PurchaseQuantity  float64   `gorm:"not null"  json:"purchase_quantity"`
 	PurchasePrice     float64   `gorm:"not null"  json:"purchase_price"`
 	RemainingQuantity float64   `json:"remaining_quantity"`

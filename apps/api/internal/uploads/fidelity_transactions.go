@@ -128,32 +128,20 @@ func (h *fidelityTransactionsHandler) Process(db *gorm.DB, file io.Reader, opts 
 	err := db.Transaction(func(tx *gorm.DB) error {
 		for i := len(transactions) - 1; i >= 0; i-- {
 			txn := &transactions[i]
-			if err := tx.Create(txn).Error; err != nil {
-				return fmt.Errorf("failed to create transaction for %s on %s: %w", txn.Symbol, txn.Date.Format(fidelityDateLayout), err)
-			}
-			result.Created++
 
 			// A stock buy opens a new tax lot at the transaction's price and
-			// quantity. Sells, options, and other non-stock actions don't -
-			// that's a later step.
-			if isStockBuy(txn.Action, txn.AssetType) && txn.Quantity != nil && txn.Price != nil {
-				lot := models.TaxLot{
-					AssetType:         *txn.AssetType,
-					Symbol:            txn.Symbol,
-					AssetDescription:  *txn.AssetDescription,
-					PurchaseDate:      txn.Date,
-					PurchaseQuantity:  *txn.Quantity,
-					PurchasePrice:     *txn.Price,
-					RemainingQuantity: *txn.Quantity,
-					AccountID:         txn.AccountID,
-				}
+			// quantity, and both the transaction and the lot link to the
+			// holding for that symbol. Sells, options, and other non-stock
+			// actions don't - that's a later step.
+			isBuy := isStockBuy(txn.Action, txn.AssetType) && txn.Quantity != nil && txn.Price != nil
 
+			var holding models.Holding
+			if isBuy {
 				// Transactions and holdings come from separate Fidelity
 				// exports, so the holding may not exist yet. Link an existing
 				// one, otherwise create a bare holding from what the
 				// transaction knows - last price and current value stay zero
 				// until a holdings import fills them in.
-				var holding models.Holding
 				err := tx.Where("symbol = ?", txn.Symbol).First(&holding).Error
 				switch {
 				case errors.Is(err, gorm.ErrRecordNotFound):
@@ -168,8 +156,26 @@ func (h *fidelityTransactionsHandler) Process(db *gorm.DB, file io.Reader, opts 
 				case err != nil:
 					return fmt.Errorf("failed to look up holding %s: %w", txn.Symbol, err)
 				}
-				lot.HoldingID = &holding.ID
+				txn.HoldingID = &holding.ID
+			}
 
+			if err := tx.Create(txn).Error; err != nil {
+				return fmt.Errorf("failed to create transaction for %s on %s: %w", txn.Symbol, txn.Date.Format(fidelityDateLayout), err)
+			}
+			result.Created++
+
+			if isBuy {
+				lot := models.TaxLot{
+					AssetType:         *txn.AssetType,
+					Symbol:            txn.Symbol,
+					AssetDescription:  *txn.AssetDescription,
+					PurchaseDate:      txn.Date,
+					PurchaseQuantity:  *txn.Quantity,
+					PurchasePrice:     *txn.Price,
+					RemainingQuantity: *txn.Quantity,
+					HoldingID:         &holding.ID,
+					AccountID:         txn.AccountID,
+				}
 				if err := tx.Create(&lot).Error; err != nil {
 					return fmt.Errorf("failed to create tax lot for %s on %s: %w", txn.Symbol, txn.Date.Format(fidelityDateLayout), err)
 				}

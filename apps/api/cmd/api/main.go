@@ -32,6 +32,8 @@ func main() {
 
 	accountHandler := handlers.NewAccountHandler(database)
 	holdingHandler := handlers.NewHoldingHandler(database)
+	taxLotHandler := handlers.NewTaxLotHandler(database)
+	transactionHandler := handlers.NewTransactionHandler(database)
 	userHandler := handlers.NewUserHandler(database)
 	uploadHandler := handlers.NewUploadHandler(database)
 
@@ -58,6 +60,11 @@ func main() {
 	r.GET("/holdings", holdingHandler.GetHoldings)
 	r.POST("/holdings", holdingHandler.CreateHolding)
 	r.PATCH("/holdings/:id", holdingHandler.UpdateHolding)
+	r.GET("/tax-lots", taxLotHandler.GetTaxLots)
+	r.POST("/tax-lots", taxLotHandler.CreateTaxLot)
+	r.PATCH("/tax-lots/:id", taxLotHandler.UpdateTaxLot)
+	r.GET("/transactions", transactionHandler.GetTransactions)
+	r.POST("/transactions", transactionHandler.CreateTransaction)
 	r.GET("/users", userHandler.GetUsers)
 	r.POST("/uploads", uploadHandler.Upload)
 

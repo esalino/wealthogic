@@ -14,8 +14,11 @@ func Connect() (*gorm.DB, error) {
 	if host == "" {
 		host = "localhost"
 	}
+	// TimeZone=UTC keeps the session in UTC so date-only columns (transaction
+	// and tax-lot dates, parsed as UTC midnight) don't shift a day when Postgres
+	// casts the timestamp to a date in a non-UTC server timezone.
 	dsn := fmt.Sprintf(
-		"host=%s user=%s password=%s dbname=%s port=%s sslmode=disable",
+		"host=%s user=%s password=%s dbname=%s port=%s sslmode=disable TimeZone=UTC",
 		host,
 		os.Getenv("POSTGRES_USER"),
 		os.Getenv("POSTGRES_PASSWORD"),

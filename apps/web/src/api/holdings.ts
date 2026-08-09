@@ -31,8 +31,6 @@ export interface Holding {
   gain_realized_percent: number
   gain_realized_amount: number
   dividend_income: number
-  // Sub-records are not returned by the list endpoint yet; lazy-loaded later.
-  tax_lots?: TaxLot[]
   created_at: string
   updated_at: string
 }

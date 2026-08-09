@@ -7,16 +7,12 @@ import {
   updateHolding,
   type CreateHoldingPayload,
   type Holding as ApiHolding,
+  type TaxLot as ApiTaxLot,
 } from '../api/holdings'
+import { createTaxLot, getTaxLots, updateTaxLot } from '../api/taxLots'
+import { getAccounts } from '../api/accounts'
 
 type ChangeDirection = 'positive' | 'negative' | 'neutral'
-
-interface TaxLot {
-  dateAcquired: string
-  quantity: string
-  costBasis: string
-  currentValue: string
-}
 
 interface Transaction {
   date: string
@@ -49,7 +45,6 @@ interface Holding {
   gainRealizedPercent: string
   gainRealizedAmount: string
   dividendIncome: string
-  taxLots: TaxLot[]
   transactions: Transaction[]
   dividends: Dividend[]
 }
@@ -59,6 +54,11 @@ const fmtCurrency = (n: number) =>
 
 const fmtNumber = (n: number) =>
   (n ?? 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+
+// Tax-lot dates are stored as a date at UTC midnight; format in UTC so they
+// don't slip to the previous day in western timezones.
+const fmtDate = (iso: string) =>
+  new Date(iso).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: '2-digit', timeZone: 'UTC' })
 
 function fmtSignedCurrency(n: number) {
   const v = n ?? 0
@@ -90,7 +90,6 @@ function toViewHolding(h: ApiHolding, totalMarketValue: number): Holding {
     gainRealizedPercent: fmtPercent(h.gain_realized_percent),
     gainRealizedAmount: fmtSignedCurrency(h.gain_realized_amount),
     dividendIncome: fmtCurrency(h.dividend_income),
-    taxLots: [],
     transactions: [],
     dividends: [],
   }
@@ -138,7 +137,15 @@ function rowActions() {
   )
 }
 
-function SubPanel({ holding, activeTab, onTabChange }: { holding: Holding; activeTab: SubTab; onTabChange: (t: SubTab) => void }) {
+function SubPanel({ holding, activeTab, onTabChange, onAddLot, onEditLot }: { holding: Holding; activeTab: SubTab; onTabChange: (t: SubTab) => void; onAddLot: () => void; onEditLot: (lot: ApiTaxLot) => void }) {
+  // Lazy-load this holding's tax lots when the row is opened. Keyed by holding
+  // id so createTaxLot's invalidation of ['tax-lots'] refetches this list.
+  const { data: taxLotsData, isLoading: lotsLoading } = useQuery({
+    queryKey: ['tax-lots', holding.id],
+    queryFn: () => getTaxLots(holding.id),
+  })
+  const lots = taxLotsData?.data ?? []
+
   return (
     <div className="p-6 space-y-4">
       {/* Tab bar */}
@@ -161,7 +168,10 @@ function SubPanel({ holding, activeTab, onTabChange }: { holding: Holding; activ
             )
           })}
         </div>
-        <button className="flex items-center gap-1 pb-2 text-label-sm font-semibold text-secondary hover:opacity-80 transition-opacity">
+        <button
+          onClick={activeTab === 'Tax Lots' ? onAddLot : undefined}
+          className="flex items-center gap-1 pb-2 text-label-sm font-semibold text-secondary hover:opacity-80 transition-opacity"
+        >
           <span className="material-symbols-outlined text-base">add</span>
           {addLabels[activeTab]}
         </button>
@@ -176,19 +186,31 @@ function SubPanel({ holding, activeTab, onTabChange }: { holding: Holding; activ
                 <tr className="text-[10px] text-label-caps text-on-surface-variant uppercase">
                   <th className="px-4 py-2">Date Acquired</th>
                   <th className="px-4 py-2 text-right">Quantity</th>
+                  <th className="px-4 py-2 text-right">Purchase Price</th>
                   <th className="px-4 py-2 text-right">Cost Basis</th>
-                  <th className="px-4 py-2 text-right">Current Value</th>
                   <th className="px-4 py-2 w-10" />
                 </tr>
               </thead>
               <tbody className="divide-y divide-outline-variant">
-                {holding.taxLots.map((lot, i) => (
-                  <tr key={i} className="text-data-tabular text-on-surface tabular-nums">
-                    <td className="px-4 py-3">{lot.dateAcquired}</td>
-                    <td className="px-4 py-3 text-right">{lot.quantity}</td>
-                    <td className="px-4 py-3 text-right">{lot.costBasis}</td>
-                    <td className="px-4 py-3 text-right">{lot.currentValue}</td>
-                    {rowActions()}
+                {lotsLoading && (
+                  <tr>
+                    <td colSpan={5} className="px-4 py-6 text-center text-body-sm text-on-surface-variant">Loading tax lots…</td>
+                  </tr>
+                )}
+                {!lotsLoading && lots.length === 0 && (
+                  <tr>
+                    <td colSpan={5} className="px-4 py-6 text-center text-body-sm text-on-surface-variant">No tax lots yet.</td>
+                  </tr>
+                )}
+                {!lotsLoading && lots.map((lot) => (
+                  <tr key={lot.id} className="text-data-tabular text-on-surface tabular-nums">
+                    <td className="px-4 py-3">{fmtDate(lot.purchase_date)}</td>
+                    <td className="px-4 py-3 text-right">{fmtNumber(lot.purchase_quantity)}</td>
+                    <td className="px-4 py-3 text-right">{fmtCurrency(lot.purchase_price)}</td>
+                    <td className="px-4 py-3 text-right">{fmtCurrency(lot.purchase_quantity * lot.purchase_price)}</td>
+                    <td className="px-4 py-3 text-right w-10">
+                      <RowMenu onEdit={() => onEditLot(lot)} />
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -614,6 +636,260 @@ function RowMenu({ onEdit }: { onEdit: () => void }) {
   )
 }
 
+// ── Add tax lot modal ─────────────────────────────────────────────────────────
+
+function AddTaxLotModal({ holding, onClose }: { holding: { id: string; symbol: string } | null; onClose: () => void }) {
+  const queryClient = useQueryClient()
+  const { data: accountsData } = useQuery({
+    queryKey: ['accounts', 'select'],
+    queryFn: () => getAccounts(1, 100),
+    enabled: holding !== null,
+  })
+  const accounts = accountsData?.data ?? []
+
+  const [accountId, setAccountId] = useState('')
+  const [purchaseDate, setPurchaseDate] = useState('')
+  const [quantity, setQuantity] = useState('')
+  const [price, setPrice] = useState('')
+  const [commission, setCommission] = useState('')
+  const [fees, setFees] = useState('')
+
+  const { mutate, isPending, error, reset } = useMutation({
+    mutationFn: createTaxLot,
+    onSuccess: () => {
+      // The lot creates a buy transaction and may shift holding totals, so
+      // refresh all three.
+      queryClient.invalidateQueries({ queryKey: ['holdings'] })
+      queryClient.invalidateQueries({ queryKey: ['tax-lots'] })
+      queryClient.invalidateQueries({ queryKey: ['transactions'] })
+      setAccountId(''); setPurchaseDate(''); setQuantity(''); setPrice(''); setCommission(''); setFees('')
+      reset()
+      onClose()
+    },
+  })
+
+  if (!holding) return null
+
+  const holdingId = holding.id
+  // Fall back to the first account until the user picks one, so the select
+  // shows a real value without needing an effect to seed it.
+  const effectiveAccountId = accountId || accounts[0]?.id || ''
+  const canSubmit =
+    effectiveAccountId !== '' && purchaseDate !== '' && parseFloat(quantity) > 0 && parseFloat(price) > 0
+
+  function submit() {
+    mutate({
+      holding_id: holdingId,
+      account_id: effectiveAccountId,
+      purchase_date: purchaseDate,
+      purchase_quantity: parseFloat(quantity) || 0,
+      purchase_price: parseFloat(price) || 0,
+      commission: parseFloat(commission) || 0,
+      fees: parseFloat(fees) || 0,
+    })
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4" onClick={onClose}>
+      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" />
+      <div
+        className="relative bg-surface-container-lowest rounded-xl shadow-card w-full max-w-md p-6"
+        onClick={(e) => e.stopPropagation()}
+        style={{ animation: 'slideUp 0.25s ease-out' }}
+      >
+        <div className="flex items-start justify-between mb-6">
+          <div>
+            <h2 className="text-headline-sm text-on-surface">Add Tax Lot</h2>
+            <p className="text-label-sm text-on-surface-variant">{holding.symbol}</p>
+          </div>
+          <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-lg text-on-surface-variant hover:bg-surface-container-high transition-colors">
+            <span className="material-symbols-outlined text-xl">close</span>
+          </button>
+        </div>
+
+        <div className="space-y-4">
+          <div>
+            <label className="block text-label-sm font-semibold text-on-surface mb-1.5">Account</label>
+            {accounts.length === 0 ? (
+              <p className="text-body-sm text-on-surface-variant">No accounts yet — create one first.</p>
+            ) : (
+              <select value={effectiveAccountId} onChange={(e) => setAccountId(e.target.value)} className={modalInputCls}>
+                {accounts.map((a) => <option key={a.id} value={a.id}>{a.account_name}</option>)}
+              </select>
+            )}
+          </div>
+
+          <div>
+            <label className="block text-label-sm font-semibold text-on-surface mb-1.5">Purchase Date</label>
+            <input type="date" value={purchaseDate} onChange={(e) => setPurchaseDate(e.target.value)} className={modalInputCls} />
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-label-sm font-semibold text-on-surface mb-1.5">Quantity</label>
+              <input type="number" value={quantity} onChange={(e) => setQuantity(e.target.value)} placeholder="0.00" className={modalNumInputCls} />
+            </div>
+            <div>
+              <label className="block text-label-sm font-semibold text-on-surface mb-1.5">Purchase Price</label>
+              <div className="relative">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-body-md text-on-surface-variant">$</span>
+                <input type="number" value={price} onChange={(e) => setPrice(e.target.value)} placeholder="0.00" className={`${modalNumInputCls} pl-7`} />
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-label-sm font-semibold text-on-surface mb-1.5">Commission</label>
+              <div className="relative">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-body-md text-on-surface-variant">$</span>
+                <input type="number" value={commission} onChange={(e) => setCommission(e.target.value)} placeholder="0.00" className={`${modalNumInputCls} pl-7`} />
+              </div>
+            </div>
+            <div>
+              <label className="block text-label-sm font-semibold text-on-surface mb-1.5">Fees</label>
+              <div className="relative">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-body-md text-on-surface-variant">$</span>
+                <input type="number" value={fees} onChange={(e) => setFees(e.target.value)} placeholder="0.00" className={`${modalNumInputCls} pl-7`} />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {error && <p className="mt-4 text-body-sm text-error">{(error as Error).message}</p>}
+
+        <div className="flex gap-3 mt-6">
+          <button onClick={onClose} disabled={isPending} className="flex-1 px-4 py-2.5 border border-outline-variant rounded-lg text-body-md text-on-surface hover:bg-surface-container-high transition-colors disabled:opacity-50">
+            Cancel
+          </button>
+          <button
+            onClick={submit}
+            disabled={isPending || !canSubmit}
+            className="flex-1 px-4 py-2.5 bg-primary text-on-primary rounded-lg text-body-md font-semibold hover:opacity-90 transition-opacity disabled:opacity-50"
+          >
+            {isPending ? 'Saving…' : 'Add Lot'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── Edit tax lot modal ────────────────────────────────────────────────────────
+
+function EditTaxLotModal({ lot, onClose }: { lot: ApiTaxLot | null; onClose: () => void }) {
+  const queryClient = useQueryClient()
+  const { data: accountsData } = useQuery({
+    queryKey: ['accounts', 'select'],
+    queryFn: () => getAccounts(1, 100),
+    enabled: lot !== null,
+  })
+  const accounts = accountsData?.data ?? []
+
+  // Seeded from the lot; the parent remounts this modal per lot via a `key`, so
+  // no effect is needed to sync when a different lot is picked.
+  const [accountId, setAccountId] = useState(lot?.account_id ?? '')
+  const [purchaseDate, setPurchaseDate] = useState(lot ? lot.purchase_date.slice(0, 10) : '')
+  const [quantity, setQuantity] = useState(lot ? String(lot.purchase_quantity) : '')
+  const [price, setPrice] = useState(lot ? String(lot.purchase_price) : '')
+
+  const { mutate, isPending, error } = useMutation({
+    mutationFn: ({ id, payload }: { id: string; payload: Parameters<typeof updateTaxLot>[1] }) =>
+      updateTaxLot(id, payload),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['holdings'] })
+      queryClient.invalidateQueries({ queryKey: ['tax-lots'] })
+      onClose()
+    },
+  })
+
+  if (!lot) return null
+
+  const lotId = lot.id
+  const canSubmit =
+    accountId !== '' && purchaseDate !== '' && parseFloat(quantity) > 0 && parseFloat(price) > 0
+
+  function submit() {
+    mutate({
+      id: lotId,
+      payload: {
+        account_id: accountId,
+        purchase_date: purchaseDate,
+        purchase_quantity: parseFloat(quantity) || 0,
+        purchase_price: parseFloat(price) || 0,
+      },
+    })
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4" onClick={onClose}>
+      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" />
+      <div
+        className="relative bg-surface-container-lowest rounded-xl shadow-card w-full max-w-md p-6"
+        onClick={(e) => e.stopPropagation()}
+        style={{ animation: 'slideUp 0.25s ease-out' }}
+      >
+        <div className="flex items-start justify-between mb-6">
+          <div>
+            <h2 className="text-headline-sm text-on-surface">Edit Tax Lot</h2>
+            <p className="text-label-sm text-on-surface-variant">{lot.symbol}</p>
+          </div>
+          <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-lg text-on-surface-variant hover:bg-surface-container-high transition-colors">
+            <span className="material-symbols-outlined text-xl">close</span>
+          </button>
+        </div>
+
+        <div className="space-y-4">
+          <div>
+            <label className="block text-label-sm font-semibold text-on-surface mb-1.5">Account</label>
+            {accounts.length === 0 ? (
+              <p className="text-body-sm text-on-surface-variant">No accounts yet — create one first.</p>
+            ) : (
+              <select value={accountId} onChange={(e) => setAccountId(e.target.value)} className={modalInputCls}>
+                {accounts.map((a) => <option key={a.id} value={a.id}>{a.account_name}</option>)}
+              </select>
+            )}
+          </div>
+
+          <div>
+            <label className="block text-label-sm font-semibold text-on-surface mb-1.5">Purchase Date</label>
+            <input type="date" value={purchaseDate} onChange={(e) => setPurchaseDate(e.target.value)} className={modalInputCls} />
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-label-sm font-semibold text-on-surface mb-1.5">Quantity</label>
+              <input type="number" value={quantity} onChange={(e) => setQuantity(e.target.value)} placeholder="0.00" className={modalNumInputCls} />
+            </div>
+            <div>
+              <label className="block text-label-sm font-semibold text-on-surface mb-1.5">Purchase Price</label>
+              <div className="relative">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-body-md text-on-surface-variant">$</span>
+                <input type="number" value={price} onChange={(e) => setPrice(e.target.value)} placeholder="0.00" className={`${modalNumInputCls} pl-7`} />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {error && <p className="mt-4 text-body-sm text-error">{(error as Error).message}</p>}
+
+        <div className="flex gap-3 mt-6">
+          <button onClick={onClose} disabled={isPending} className="flex-1 px-4 py-2.5 border border-outline-variant rounded-lg text-body-md text-on-surface hover:bg-surface-container-high transition-colors disabled:opacity-50">
+            Cancel
+          </button>
+          <button
+            onClick={submit}
+            disabled={isPending || !canSubmit}
+            className="flex-1 px-4 py-2.5 bg-primary text-on-primary rounded-lg text-body-md font-semibold hover:opacity-90 transition-opacity disabled:opacity-50"
+          >
+            {isPending ? 'Saving…' : 'Save Changes'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default function Portfolio() {
   const [mounted, setMounted] = useState(false)
   const [sortBy, setSortBy] = useState('Market Value High to Low')
@@ -622,6 +898,8 @@ export default function Portfolio() {
   const [pagination, setPagination] = useState({ pageIndex: 0, pageSize: 10 })
   const [addOpen, setAddOpen] = useState(false)
   const [editingHolding, setEditingHolding] = useState<ApiHolding | null>(null)
+  const [addLotHolding, setAddLotHolding] = useState<{ id: string; symbol: string } | null>(null)
+  const [editingLot, setEditingLot] = useState<ApiTaxLot | null>(null)
 
   const { data, isLoading, isError, error } = useQuery({
     queryKey: ['holdings', pagination.pageIndex, pagination.pageSize],
@@ -854,7 +1132,13 @@ export default function Portfolio() {
                       {expanded && (
                         <tr className="bg-surface-container-lowest border-b border-outline-variant">
                           <td className="p-0" colSpan={10}>
-                            <SubPanel holding={h} activeTab={activeTab} onTabChange={setActiveTab} />
+                            <SubPanel
+                              holding={h}
+                              activeTab={activeTab}
+                              onTabChange={setActiveTab}
+                              onAddLot={() => setAddLotHolding({ id: h.id, symbol: h.symbol })}
+                              onEditLot={setEditingLot}
+                            />
                           </td>
                         </tr>
                       )}
@@ -903,6 +1187,8 @@ export default function Portfolio() {
 
       <AddHoldingModal isOpen={addOpen} onClose={() => setAddOpen(false)} />
       <EditHoldingModal key={editingHolding?.id} holding={editingHolding} onClose={() => setEditingHolding(null)} />
+      <AddTaxLotModal key={addLotHolding?.id} holding={addLotHolding} onClose={() => setAddLotHolding(null)} />
+      <EditTaxLotModal key={editingLot?.id} lot={editingLot} onClose={() => setEditingLot(null)} />
     </>
   )
 }

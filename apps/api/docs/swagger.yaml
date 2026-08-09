@@ -73,6 +73,61 @@ definitions:
     - asset_type
     - description
     type: object
+  CreateTaxLotRequest:
+    properties:
+      account_id:
+        type: string
+      commission:
+        type: number
+      fees:
+        type: number
+      holding_id:
+        type: string
+      purchase_date:
+        type: string
+      purchase_price:
+        type: number
+      purchase_quantity:
+        type: number
+    required:
+    - purchase_date
+    - purchase_price
+    - purchase_quantity
+    type: object
+  CreateTransactionRequest:
+    properties:
+      account_id:
+        type: string
+      action:
+        type: string
+      amount:
+        type: number
+      asset_description:
+        type: string
+      asset_type:
+        type: string
+      commission:
+        type: number
+      date:
+        type: string
+      fees:
+        type: number
+      holding_id:
+        type: string
+      price:
+        type: number
+      quantity:
+        type: number
+      realized_gains:
+        type: number
+      settlement_date:
+        type: string
+      symbol:
+        type: string
+    required:
+    - action
+    - date
+    type: object
   Holding:
     properties:
       asset_type:
@@ -107,10 +162,6 @@ definitions:
         type: string
       symbol:
         type: string
-      tax_lots:
-        items:
-          $ref: '#/definitions/TaxLot'
-        type: array
       updated_at:
         type: string
     type: object
@@ -132,6 +183,32 @@ definitions:
       data:
         items:
           $ref: '#/definitions/Holding'
+        type: array
+      page:
+        type: integer
+      page_size:
+        type: integer
+      total:
+        type: integer
+    type: object
+  PaginatedTaxLots:
+    properties:
+      data:
+        items:
+          $ref: '#/definitions/TaxLot'
+        type: array
+      page:
+        type: integer
+      page_size:
+        type: integer
+      total:
+        type: integer
+    type: object
+  PaginatedTransactions:
+    properties:
+      data:
+        items:
+          $ref: '#/definitions/Transaction'
         type: array
       page:
         type: integer
@@ -171,6 +248,13 @@ definitions:
       updated_at:
         type: string
     type: object
+  TaxLotWithTransaction:
+    properties:
+      tax_lot:
+        $ref: '#/definitions/TaxLot'
+      transaction:
+        $ref: '#/definitions/Transaction'
+    type: object
   Transaction:
     properties:
       account_id:
@@ -191,6 +275,12 @@ definitions:
         type: string
       fees:
         type: number
+      holding_id:
+        description: |-
+          HoldingID is nil until a matching Holding exists to link to - imported
+          transactions and holdings come from separate Fidelity exports and may
+          not arrive in the same order.
+        type: string
       id:
         type: string
       price:
@@ -228,6 +318,21 @@ definitions:
         type: string
       symbol:
         type: string
+    type: object
+  UpdateTaxLotRequest:
+    properties:
+      account_id:
+        type: string
+      purchase_date:
+        type: string
+      purchase_price:
+        type: number
+      purchase_quantity:
+        type: number
+    required:
+    - purchase_date
+    - purchase_price
+    - purchase_quantity
     type: object
   UploadResult:
     properties:
@@ -420,6 +525,182 @@ paths:
       summary: Update an existing holding
       tags:
       - holdings
+  /tax-lots:
+    get:
+      parameters:
+      - description: Page number (default 1)
+        in: query
+        name: page
+        type: integer
+      - description: Items per page (default 20, max 100)
+        in: query
+        name: page_size
+        type: integer
+      - description: Filter to a single holding
+        in: query
+        name: holding_id
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/PaginatedTaxLots'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: List tax lots with pagination
+      tags:
+      - tax-lots
+    post:
+      consumes:
+      - application/json
+      description: Records a purchase lot against a holding and, in the same transaction,
+        the buy transaction that produced it.
+      parameters:
+      - description: Tax lot payload
+        in: body
+        name: tax_lot
+        required: true
+        schema:
+          $ref: '#/definitions/CreateTaxLotRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/TaxLotWithTransaction'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Add a tax lot
+      tags:
+      - tax-lots
+  /tax-lots/{id}:
+    patch:
+      consumes:
+      - application/json
+      description: Updates the lot and recomputes the holding's position from its
+        open lots. The originally recorded buy transaction is left as-is.
+      parameters:
+      - description: Tax lot ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Tax lot payload
+        in: body
+        name: tax_lot
+        required: true
+        schema:
+          $ref: '#/definitions/UpdateTaxLotRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/TaxLot'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Update a tax lot
+      tags:
+      - tax-lots
+  /transactions:
+    get:
+      parameters:
+      - description: Page number (default 1)
+        in: query
+        name: page
+        type: integer
+      - description: Items per page (default 20, max 100)
+        in: query
+        name: page_size
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/PaginatedTransactions'
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: List transactions with pagination
+      tags:
+      - transactions
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Transaction payload
+        in: body
+        name: transaction
+        required: true
+        schema:
+          $ref: '#/definitions/CreateTransactionRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/Transaction'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Create a transaction
+      tags:
+      - transactions
   /uploads:
     post:
       consumes:

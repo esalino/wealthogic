@@ -31,5 +31,9 @@ type Transaction struct {
 
 	RealizedGains float64 `json:"realized_gains"`
 
-	AccountID uuid.UUID `gorm:"type:uuid" json:"account_id"`
+	// HoldingID is nil until a matching Holding exists to link to - imported
+	// transactions and holdings come from separate Fidelity exports and may
+	// not arrive in the same order.
+	HoldingID *uuid.UUID `gorm:"type:uuid" json:"holding_id"`
+	AccountID uuid.UUID  `gorm:"type:uuid" json:"account_id"`
 } // @name Transaction

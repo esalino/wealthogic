@@ -264,6 +264,272 @@ const docTemplate = `{
                 }
             }
         },
+        "/tax-lots": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "tax-lots"
+                ],
+                "summary": "List tax lots with pagination",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Page number (default 1)",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Items per page (default 20, max 100)",
+                        "name": "page_size",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter to a single holding",
+                        "name": "holding_id",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/PaginatedTaxLots"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            },
+            "post": {
+                "description": "Records a purchase lot against a holding and, in the same transaction, the buy transaction that produced it.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "tax-lots"
+                ],
+                "summary": "Add a tax lot",
+                "parameters": [
+                    {
+                        "description": "Tax lot payload",
+                        "name": "tax_lot",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/CreateTaxLotRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/TaxLotWithTransaction"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/tax-lots/{id}": {
+            "patch": {
+                "description": "Updates the lot and recomputes the holding's position from its open lots. The originally recorded buy transaction is left as-is.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "tax-lots"
+                ],
+                "summary": "Update a tax lot",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Tax lot ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Tax lot payload",
+                        "name": "tax_lot",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/UpdateTaxLotRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/TaxLot"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/transactions": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "transactions"
+                ],
+                "summary": "List transactions with pagination",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Page number (default 1)",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Items per page (default 20, max 100)",
+                        "name": "page_size",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/PaginatedTransactions"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            },
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "transactions"
+                ],
+                "summary": "Create a transaction",
+                "parameters": [
+                    {
+                        "description": "Transaction payload",
+                        "name": "transaction",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/CreateTransactionRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/Transaction"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/uploads": {
             "post": {
                 "description": "Routes the file to a handler selected by file_type + account_type (currently: holdings + fidelity)",
@@ -446,6 +712,88 @@ const docTemplate = `{
                 }
             }
         },
+        "CreateTaxLotRequest": {
+            "type": "object",
+            "required": [
+                "purchase_date",
+                "purchase_price",
+                "purchase_quantity"
+            ],
+            "properties": {
+                "account_id": {
+                    "type": "string"
+                },
+                "commission": {
+                    "type": "number"
+                },
+                "fees": {
+                    "type": "number"
+                },
+                "holding_id": {
+                    "type": "string"
+                },
+                "purchase_date": {
+                    "type": "string"
+                },
+                "purchase_price": {
+                    "type": "number"
+                },
+                "purchase_quantity": {
+                    "type": "number"
+                }
+            }
+        },
+        "CreateTransactionRequest": {
+            "type": "object",
+            "required": [
+                "action",
+                "date"
+            ],
+            "properties": {
+                "account_id": {
+                    "type": "string"
+                },
+                "action": {
+                    "type": "string"
+                },
+                "amount": {
+                    "type": "number"
+                },
+                "asset_description": {
+                    "type": "string"
+                },
+                "asset_type": {
+                    "type": "string"
+                },
+                "commission": {
+                    "type": "number"
+                },
+                "date": {
+                    "type": "string"
+                },
+                "fees": {
+                    "type": "number"
+                },
+                "holding_id": {
+                    "type": "string"
+                },
+                "price": {
+                    "type": "number"
+                },
+                "quantity": {
+                    "type": "number"
+                },
+                "realized_gains": {
+                    "type": "number"
+                },
+                "settlement_date": {
+                    "type": "string"
+                },
+                "symbol": {
+                    "type": "string"
+                }
+            }
+        },
         "Holding": {
             "type": "object",
             "properties": {
@@ -497,12 +845,6 @@ const docTemplate = `{
                 "symbol": {
                     "type": "string"
                 },
-                "tax_lots": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/TaxLot"
-                    }
-                },
                 "updated_at": {
                     "type": "string"
                 }
@@ -535,6 +877,46 @@ const docTemplate = `{
                     "type": "array",
                     "items": {
                         "$ref": "#/definitions/Holding"
+                    }
+                },
+                "page": {
+                    "type": "integer"
+                },
+                "page_size": {
+                    "type": "integer"
+                },
+                "total": {
+                    "type": "integer"
+                }
+            }
+        },
+        "PaginatedTaxLots": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/TaxLot"
+                    }
+                },
+                "page": {
+                    "type": "integer"
+                },
+                "page_size": {
+                    "type": "integer"
+                },
+                "total": {
+                    "type": "integer"
+                }
+            }
+        },
+        "PaginatedTransactions": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/Transaction"
                     }
                 },
                 "page": {
@@ -590,6 +972,17 @@ const docTemplate = `{
                 }
             }
         },
+        "TaxLotWithTransaction": {
+            "type": "object",
+            "properties": {
+                "tax_lot": {
+                    "$ref": "#/definitions/TaxLot"
+                },
+                "transaction": {
+                    "$ref": "#/definitions/Transaction"
+                }
+            }
+        },
         "Transaction": {
             "type": "object",
             "properties": {
@@ -619,6 +1012,10 @@ const docTemplate = `{
                 },
                 "fees": {
                     "type": "number"
+                },
+                "holding_id": {
+                    "description": "HoldingID is nil until a matching Holding exists to link to - imported\ntransactions and holdings come from separate Fidelity exports and may\nnot arrive in the same order.",
+                    "type": "string"
                 },
                 "id": {
                     "type": "string"
@@ -675,6 +1072,28 @@ const docTemplate = `{
                 },
                 "symbol": {
                     "type": "string"
+                }
+            }
+        },
+        "UpdateTaxLotRequest": {
+            "type": "object",
+            "required": [
+                "purchase_date",
+                "purchase_price",
+                "purchase_quantity"
+            ],
+            "properties": {
+                "account_id": {
+                    "type": "string"
+                },
+                "purchase_date": {
+                    "type": "string"
+                },
+                "purchase_price": {
+                    "type": "number"
+                },
+                "purchase_quantity": {
+                    "type": "number"
                 }
             }
         },

@@ -3,6 +3,8 @@ package handlers
 import (
 	"net/http"
 	"strconv"
+	"strings"
+	"time"
 
 	"github.com/eriksalino/wealthogic/api/internal/models"
 	"github.com/gin-gonic/gin"
@@ -151,6 +153,16 @@ func (h *holdingHandler) UpdateHolding(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, holding)
+}
+
+// parseInputDate accepts either a plain date (YYYY-MM-DD, as an HTML date
+// input produces) or a full RFC3339 timestamp.
+func parseInputDate(s string) (time.Time, error) {
+	s = strings.TrimSpace(s)
+	if t, err := time.Parse("2006-01-02", s); err == nil {
+		return t, nil
+	}
+	return time.Parse(time.RFC3339, s)
 }
 
 // GetHoldings godoc
