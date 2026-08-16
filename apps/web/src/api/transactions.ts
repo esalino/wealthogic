@@ -27,8 +27,9 @@ export interface PaginatedTransactions {
   page_size: number
 }
 
-export async function getTransactions(page = 1, pageSize = 20): Promise<PaginatedTransactions> {
+export async function getTransactions(holdingId?: string, page = 1, pageSize = 100): Promise<PaginatedTransactions> {
   const params = new URLSearchParams({ page: String(page), page_size: String(pageSize) })
+  if (holdingId) params.set('holding_id', holdingId)
   const res = await fetch(`${API_BASE}/transactions?${params}`)
 
   if (!res.ok) {
@@ -69,4 +70,39 @@ export async function createTransaction(payload: CreateTransactionPayload): Prom
   }
 
   return res.json()
+}
+
+export interface UpdateTransactionPayload {
+  account_id: string
+  action: string
+  date: string
+  quantity?: number | null
+  price?: number | null
+  amount: number
+  commission?: number
+  fees?: number
+}
+
+export async function updateTransaction(id: string, payload: UpdateTransactionPayload): Promise<Transaction> {
+  const res = await fetch(`${API_BASE}/transactions/${id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.error ?? 'Failed to update transaction')
+  }
+
+  return res.json()
+}
+
+export async function deleteTransaction(id: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/transactions/${id}`, { method: 'DELETE' })
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.error ?? 'Failed to delete transaction')
+  }
 }

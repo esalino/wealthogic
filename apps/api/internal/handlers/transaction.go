@@ -1,8 +1,10 @@
 package handlers
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/eriksalino/wealthogic/api/internal/models"
@@ -11,9 +13,15 @@ import (
 	"gorm.io/gorm"
 )
 
+// errInsufficientShares is returned from the create transaction when a sell
+// asks for more shares than the account's open lots hold. It maps to a 400.
+var errInsufficientShares = errors.New("not enough shares to sell")
+
 type TransactionHandler interface {
 	GetTransactions(c *gin.Context)
 	CreateTransaction(c *gin.Context)
+	UpdateTransaction(c *gin.Context)
+	DeleteTransaction(c *gin.Context)
 }
 
 type transactionHandler struct {
@@ -35,10 +43,12 @@ type paginatedTransactions struct {
 // @Summary      List transactions with pagination
 // @Tags         transactions
 // @Produce      json
-// @Param        page       query     int  false  "Page number (default 1)"
-// @Param        page_size  query     int  false  "Items per page (default 20, max 100)"
-// @Success      200        {object}  paginatedTransactions
-// @Failure      500        {object}  map[string]string
+// @Param        page        query     int     false  "Page number (default 1)"
+// @Param        page_size   query     int     false  "Items per page (default 20, max 100)"
+// @Param        holding_id  query     string  false  "Filter to a single holding"
+// @Success      200         {object}  paginatedTransactions
+// @Failure      400         {object}  map[string]string
+// @Failure      500         {object}  map[string]string
 // @Router       /transactions [get]
 func (h *transactionHandler) GetTransactions(c *gin.Context) {
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
@@ -51,8 +61,19 @@ func (h *transactionHandler) GetTransactions(c *gin.Context) {
 		pageSize = 20
 	}
 
+	// Optional holding_id filter, applied to both the count and the page query.
+	applyFilter := func(q *gorm.DB) *gorm.DB { return q }
+	if hid := c.Query("holding_id"); hid != "" {
+		holdingID, err := uuid.Parse(hid)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid holding_id"})
+			return
+		}
+		applyFilter = func(q *gorm.DB) *gorm.DB { return q.Where("holding_id = ?", holdingID) }
+	}
+
 	var total int64
-	if err := h.db.Model(&models.Transaction{}).Count(&total).Error; err != nil {
+	if err := applyFilter(h.db.Model(&models.Transaction{})).Count(&total).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch transactions"})
 		return
 	}
@@ -61,7 +82,7 @@ func (h *transactionHandler) GetTransactions(c *gin.Context) {
 	offset := (page - 1) * pageSize
 	// Newest first. UUIDv7 ids are time-ordered, so id breaks date ties in
 	// insertion order.
-	if err := h.db.Order("date DESC").Order("id DESC").Offset(offset).Limit(pageSize).Find(&transactions).Error; err != nil {
+	if err := applyFilter(h.db.Model(&models.Transaction{})).Order("date DESC").Order("id DESC").Offset(offset).Limit(pageSize).Find(&transactions).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch transactions"})
 		return
 	}
@@ -159,10 +180,316 @@ func (h *transactionHandler) CreateTransaction(c *gin.Context) {
 		RealizedGains:    req.RealizedGains,
 	}
 
-	if err := h.db.Create(&txn).Error; err != nil {
+	// Buys and sells against a holding touch tax lots: a buy opens a new lot; a
+	// sell depletes open lots. Both need a holding plus a quantity and price;
+	// other actions are just recorded. (Only buy/sell for now.)
+	isBuy := strings.EqualFold(req.Action, "Buy") && req.HoldingID != nil && req.Quantity != nil && req.Price != nil
+	isSell := strings.EqualFold(req.Action, "Sell") && req.HoldingID != nil && req.Quantity != nil && req.Price != nil
+
+	err = h.db.Transaction(func(tx *gorm.DB) error {
+		var holding models.Holding
+		if isBuy || isSell {
+			if err := tx.First(&holding, "id = ?", *req.HoldingID).Error; err != nil {
+				return err
+			}
+		}
+
+		// A sell consumes shares from this account's open lots for the holding,
+		// in the account's cost-basis order (FIFO oldest-first by default, LIFO
+		// newest-first), and records the realized gain on the transaction.
+		if isSell {
+			dateOrder, idOrder := "purchase_date ASC", "id ASC"
+			if strings.EqualFold(account.DefaultCostBasis, "LIFO") {
+				dateOrder, idOrder = "purchase_date DESC", "id DESC"
+			}
+			var lots []models.TaxLot
+			if err := tx.Where("holding_id = ? AND account_id = ? AND remaining_quantity > 0", holding.ID, req.AccountID).
+				Order(dateOrder).Order(idOrder).Find(&lots).Error; err != nil {
+				return err
+			}
+			var available float64
+			for i := range lots {
+				available += lots[i].RemainingQuantity
+			}
+			if *req.Quantity > available {
+				return errInsufficientShares
+			}
+			toSell := *req.Quantity
+			var realized float64
+			for i := range lots {
+				if toSell <= 0 {
+					break
+				}
+				take := lots[i].RemainingQuantity
+				if take > toSell {
+					take = toSell
+				}
+				realized += (*req.Price - lots[i].PurchasePrice) * take
+				lots[i].RemainingQuantity -= take
+				toSell -= take
+				if err := tx.Save(&lots[i]).Error; err != nil {
+					return err
+				}
+			}
+			txn.RealizedGains = realized
+		}
+
+		if err := tx.Create(&txn).Error; err != nil {
+			return err
+		}
+
+		// A buy opens a new lot from the purchase.
+		if isBuy {
+			lot := models.TaxLot{
+				AssetType:         holding.AssetType,
+				Symbol:            holding.Symbol,
+				AssetDescription:  holding.Description,
+				PurchaseDate:      date,
+				PurchaseQuantity:  *req.Quantity,
+				PurchasePrice:     *req.Price,
+				RemainingQuantity: *req.Quantity,
+				HoldingID:         &holding.ID,
+				AccountID:         req.AccountID,
+			}
+			if err := tx.Create(&lot).Error; err != nil {
+				return err
+			}
+		}
+
+		if isBuy || isSell {
+			return recalcHoldingFromLots(tx, &holding)
+		}
+		return nil
+	})
+	if errors.Is(err, errInsufficientShares) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "not enough shares to sell"})
+		return
+	}
+	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create transaction"})
 		return
 	}
 
 	c.JSON(http.StatusCreated, txn)
+}
+
+type updateTransactionRequest struct {
+	AccountID  uuid.UUID `json:"account_id"`
+	Action     string    `json:"action" binding:"required"`
+	Date       string    `json:"date" binding:"required"`
+	Quantity   *float64  `json:"quantity"`
+	Price      *float64  `json:"price"`
+	Amount     float64   `json:"amount"`
+	Commission float64   `json:"commission"`
+	Fees       float64   `json:"fees"`
+} // @name UpdateTransactionRequest
+
+// UpdateTransaction godoc
+// @Summary      Update a transaction
+// @Description  Updates the transaction; if it belongs to a holding, the holding's lots and aggregates are rebuilt from its buys and sells. A buy's own lot is not changed.
+// @Tags         transactions
+// @Accept       json
+// @Produce      json
+// @Param        id           path      string                    true  "Transaction ID"
+// @Param        transaction  body      updateTransactionRequest  true  "Transaction payload"
+// @Success      200          {object}  models.Transaction
+// @Failure      400          {object}  map[string]string
+// @Failure      404          {object}  map[string]string
+// @Failure      500          {object}  map[string]string
+// @Router       /transactions/{id} [patch]
+func (h *transactionHandler) UpdateTransaction(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid transaction id"})
+		return
+	}
+
+	var req updateTransactionRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if req.AccountID == uuid.Nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "account_id is required"})
+		return
+	}
+
+	date, err := parseInputDate(req.Date)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "date must be YYYY-MM-DD or RFC3339"})
+		return
+	}
+
+	var txn models.Transaction
+	if err := h.db.First(&txn, "id = ?", id).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "transaction not found"})
+		return
+	}
+
+	var account models.Account
+	if err := h.db.First(&account, "id = ?", req.AccountID).Error; err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "account not found"})
+		return
+	}
+
+	// Only the fields the edit form owns are touched; holding_id, symbol,
+	// settlement_date, realized_gains, etc. are preserved.
+	txn.AccountID = req.AccountID
+	txn.Action = req.Action
+	txn.Date = date
+	txn.Quantity = req.Quantity
+	txn.Price = req.Price
+	txn.Amount = req.Amount
+	txn.Commission = req.Commission
+	txn.Fees = req.Fees
+
+	if err := h.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Save(&txn).Error; err != nil {
+			return err
+		}
+		// A sell's lot depletion can't be reversed in isolation, so rebuild the
+		// whole holding from its buys and sells after any change. Strict so an
+		// edit that over-sells is rejected.
+		if txn.HoldingID != nil {
+			return rebuildHolding(tx, *txn.HoldingID, true)
+		}
+		return nil
+	}); err != nil {
+		if errors.Is(err, errInsufficientShares) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "not enough shares to sell"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update transaction"})
+		return
+	}
+
+	// The rebuild may have recomputed this sell's realized gain, so reload.
+	if err := h.db.First(&txn, "id = ?", txn.ID).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load transaction"})
+		return
+	}
+
+	c.JSON(http.StatusOK, txn)
+}
+
+// DeleteTransaction godoc
+// @Summary      Delete a transaction
+// @Description  Soft-deletes the transaction; if it belongs to a holding, the holding's lots and aggregates are rebuilt from its remaining buys and sells. A buy's own lot is not removed.
+// @Tags         transactions
+// @Produce      json
+// @Param        id   path      string  true  "Transaction ID"
+// @Success      204  "No Content"
+// @Failure      400  {object}  map[string]string
+// @Failure      404  {object}  map[string]string
+// @Failure      500  {object}  map[string]string
+// @Router       /transactions/{id} [delete]
+func (h *transactionHandler) DeleteTransaction(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid transaction id"})
+		return
+	}
+
+	var txn models.Transaction
+	if err := h.db.First(&txn, "id = ?", id).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "transaction not found"})
+		return
+	}
+
+	if err := h.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Delete(&txn).Error; err != nil {
+			return err
+		}
+		// Removing a sell returns its shares to the lots, so rebuild the holding.
+		// Not strict: a delete only frees shares and must never fail.
+		if txn.HoldingID != nil {
+			return rebuildHolding(tx, *txn.HoldingID, false)
+		}
+		return nil
+	}); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete transaction"})
+		return
+	}
+
+	c.Status(http.StatusNoContent)
+}
+
+// rebuildHolding recomputes a holding's tax-lot remaining quantities, per-sell
+// realized gains, and aggregates by replaying its sells against its lots from
+// scratch. A single sell's depletion can't be reversed in isolation, so any
+// create/edit/delete of a holding's sell rebuilds the whole holding.
+//
+// When strict is set (edits), a sell that can't be fully filled from available
+// shares returns errInsufficientShares so the caller can reject it. Deletes
+// pass strict=false: removing a sell only frees shares, so it must never fail.
+func rebuildHolding(tx *gorm.DB, holdingID uuid.UUID, strict bool) error {
+	// Reset every lot to its full purchased quantity.
+	if err := tx.Model(&models.TaxLot{}).Where("holding_id = ?", holdingID).
+		Update("remaining_quantity", gorm.Expr("purchase_quantity")).Error; err != nil {
+		return err
+	}
+
+	// Replay sells oldest first so lots match to sells chronologically.
+	var sells []models.Transaction
+	if err := tx.Where("holding_id = ? AND LOWER(action) = ?", holdingID, "sell").
+		Order("date ASC").Order("id ASC").Find(&sells).Error; err != nil {
+		return err
+	}
+
+	costBasisMethod := map[uuid.UUID]string{}
+	for i := range sells {
+		sell := &sells[i]
+		var realized float64
+		if sell.Quantity != nil && sell.Price != nil {
+			method, ok := costBasisMethod[sell.AccountID]
+			if !ok {
+				var account models.Account
+				if err := tx.First(&account, "id = ?", sell.AccountID).Error; err == nil {
+					method = account.DefaultCostBasis
+				}
+				costBasisMethod[sell.AccountID] = method
+			}
+			dateOrder, idOrder := "purchase_date ASC", "id ASC"
+			if strings.EqualFold(method, "LIFO") {
+				dateOrder, idOrder = "purchase_date DESC", "id DESC"
+			}
+
+			var lots []models.TaxLot
+			if err := tx.Where("holding_id = ? AND account_id = ? AND remaining_quantity > 0", holdingID, sell.AccountID).
+				Order(dateOrder).Order(idOrder).Find(&lots).Error; err != nil {
+				return err
+			}
+			toSell := *sell.Quantity
+			for li := range lots {
+				if toSell <= 0 {
+					break
+				}
+				take := lots[li].RemainingQuantity
+				if take > toSell {
+					take = toSell
+				}
+				realized += (*sell.Price - lots[li].PurchasePrice) * take
+				lots[li].RemainingQuantity -= take
+				toSell -= take
+				if err := tx.Save(&lots[li]).Error; err != nil {
+					return err
+				}
+			}
+			// Strict callers (edits) reject a sell that can't be fully filled
+			// from the available shares.
+			if strict && toSell > 1e-9 {
+				return errInsufficientShares
+			}
+		}
+		sell.RealizedGains = realized
+		if err := tx.Save(sell).Error; err != nil {
+			return err
+		}
+	}
+
+	var holding models.Holding
+	if err := tx.First(&holding, "id = ?", holdingID).Error; err != nil {
+		return err
+	}
+	return recalcHoldingFromLots(tx, &holding)
 }

@@ -10,18 +10,10 @@ import {
   type TaxLot as ApiTaxLot,
 } from '../api/holdings'
 import { createTaxLot, getTaxLots, updateTaxLot } from '../api/taxLots'
+import { createTransaction, deleteTransaction, getTransactions, updateTransaction, type Transaction as ApiTransaction } from '../api/transactions'
 import { getAccounts } from '../api/accounts'
 
 type ChangeDirection = 'positive' | 'negative' | 'neutral'
-
-interface Transaction {
-  date: string
-  action: string
-  quantity: string
-  price: string
-  amount: string
-  amountDir: ChangeDirection
-}
 
 interface Dividend {
   date: string
@@ -45,7 +37,6 @@ interface Holding {
   gainRealizedPercent: string
   gainRealizedAmount: string
   dividendIncome: string
-  transactions: Transaction[]
   dividends: Dividend[]
 }
 
@@ -90,7 +81,6 @@ function toViewHolding(h: ApiHolding, totalMarketValue: number): Holding {
     gainRealizedPercent: fmtPercent(h.gain_realized_percent),
     gainRealizedAmount: fmtSignedCurrency(h.gain_realized_amount),
     dividendIncome: fmtCurrency(h.dividend_income),
-    transactions: [],
     dividends: [],
   }
 }
@@ -137,7 +127,7 @@ function rowActions() {
   )
 }
 
-function SubPanel({ holding, activeTab, onTabChange, onAddLot, onEditLot }: { holding: Holding; activeTab: SubTab; onTabChange: (t: SubTab) => void; onAddLot: () => void; onEditLot: (lot: ApiTaxLot) => void }) {
+function SubPanel({ holding, activeTab, onTabChange, onAddLot, onEditLot, onAddTransaction, onEditTransaction }: { holding: Holding; activeTab: SubTab; onTabChange: (t: SubTab) => void; onAddLot: () => void; onEditLot: (lot: ApiTaxLot) => void; onAddTransaction: () => void; onEditTransaction: (txn: ApiTransaction) => void }) {
   // Lazy-load this holding's tax lots when the row is opened. Keyed by holding
   // id so createTaxLot's invalidation of ['tax-lots'] refetches this list.
   const { data: taxLotsData, isLoading: lotsLoading } = useQuery({
@@ -145,6 +135,25 @@ function SubPanel({ holding, activeTab, onTabChange, onAddLot, onEditLot }: { ho
     queryFn: () => getTaxLots(holding.id),
   })
   const lots = taxLotsData?.data ?? []
+
+  // Same for transactions. Adding a lot records a buy transaction and
+  // invalidates ['transactions'], so this list refreshes then too.
+  const { data: txnsData, isLoading: txnsLoading } = useQuery({
+    queryKey: ['transactions', holding.id],
+    queryFn: () => getTransactions(holding.id),
+  })
+  const txns = txnsData?.data ?? []
+
+  const queryClient = useQueryClient()
+  const deleteTxn = useMutation({
+    mutationFn: deleteTransaction,
+    onSuccess: () => {
+      // Deleting a sell returns shares to the lots and recomputes the holding.
+      queryClient.invalidateQueries({ queryKey: ['transactions'] })
+      queryClient.invalidateQueries({ queryKey: ['tax-lots'] })
+      queryClient.invalidateQueries({ queryKey: ['holdings'] })
+    },
+  })
 
   return (
     <div className="p-6 space-y-4">
@@ -169,7 +178,7 @@ function SubPanel({ holding, activeTab, onTabChange, onAddLot, onEditLot }: { ho
           })}
         </div>
         <button
-          onClick={activeTab === 'Tax Lots' ? onAddLot : undefined}
+          onClick={activeTab === 'Tax Lots' ? onAddLot : activeTab === 'Transactions' ? onAddTransaction : undefined}
           className="flex items-center gap-1 pb-2 text-label-sm font-semibold text-secondary hover:opacity-80 transition-opacity"
         >
           <span className="material-symbols-outlined text-base">add</span>
@@ -186,6 +195,7 @@ function SubPanel({ holding, activeTab, onTabChange, onAddLot, onEditLot }: { ho
                 <tr className="text-[10px] text-label-caps text-on-surface-variant uppercase">
                   <th className="px-4 py-2">Date Acquired</th>
                   <th className="px-4 py-2 text-right">Quantity</th>
+                  <th className="px-4 py-2 text-right">Remaining</th>
                   <th className="px-4 py-2 text-right">Purchase Price</th>
                   <th className="px-4 py-2 text-right">Cost Basis</th>
                   <th className="px-4 py-2 w-10" />
@@ -194,25 +204,32 @@ function SubPanel({ holding, activeTab, onTabChange, onAddLot, onEditLot }: { ho
               <tbody className="divide-y divide-outline-variant">
                 {lotsLoading && (
                   <tr>
-                    <td colSpan={5} className="px-4 py-6 text-center text-body-sm text-on-surface-variant">Loading tax lots…</td>
+                    <td colSpan={6} className="px-4 py-6 text-center text-body-sm text-on-surface-variant">Loading tax lots…</td>
                   </tr>
                 )}
                 {!lotsLoading && lots.length === 0 && (
                   <tr>
-                    <td colSpan={5} className="px-4 py-6 text-center text-body-sm text-on-surface-variant">No tax lots yet.</td>
+                    <td colSpan={6} className="px-4 py-6 text-center text-body-sm text-on-surface-variant">No tax lots yet.</td>
                   </tr>
                 )}
-                {!lotsLoading && lots.map((lot) => (
-                  <tr key={lot.id} className="text-data-tabular text-on-surface tabular-nums">
-                    <td className="px-4 py-3">{fmtDate(lot.purchase_date)}</td>
-                    <td className="px-4 py-3 text-right">{fmtNumber(lot.purchase_quantity)}</td>
-                    <td className="px-4 py-3 text-right">{fmtCurrency(lot.purchase_price)}</td>
-                    <td className="px-4 py-3 text-right">{fmtCurrency(lot.purchase_quantity * lot.purchase_price)}</td>
-                    <td className="px-4 py-3 text-right w-10">
-                      <RowMenu onEdit={() => onEditLot(lot)} />
-                    </td>
-                  </tr>
-                ))}
+                {!lotsLoading && lots.map((lot) => {
+                  const closed = lot.remaining_quantity <= 0
+                  return (
+                    <tr key={lot.id} className={`text-data-tabular text-on-surface tabular-nums ${closed ? 'opacity-50' : ''}`}>
+                      <td className="px-4 py-3">{fmtDate(lot.purchase_date)}</td>
+                      <td className="px-4 py-3 text-right">{fmtNumber(lot.purchase_quantity)}</td>
+                      <td className="px-4 py-3 text-right">
+                        {fmtNumber(lot.remaining_quantity)}
+                        {closed && <span className="ml-2 text-[10px] font-bold text-on-surface-variant uppercase">Closed</span>}
+                      </td>
+                      <td className="px-4 py-3 text-right">{fmtCurrency(lot.purchase_price)}</td>
+                      <td className="px-4 py-3 text-right">{fmtCurrency(lot.remaining_quantity * lot.purchase_price)}</td>
+                      <td className="px-4 py-3 text-right w-10">
+                        <RowMenu onEdit={() => onEditLot(lot)} />
+                      </td>
+                    </tr>
+                  )
+                })}
               </tbody>
             </>
           )}
@@ -230,28 +247,32 @@ function SubPanel({ holding, activeTab, onTabChange, onAddLot, onEditLot }: { ho
                 </tr>
               </thead>
               <tbody className="divide-y divide-outline-variant">
-                {holding.transactions.map((txn, i) => (
-                  <tr key={i} className="text-data-tabular text-on-surface tabular-nums">
-                    <td className="px-4 py-3">{txn.date}</td>
+                {txnsLoading && (
+                  <tr>
+                    <td colSpan={6} className="px-4 py-6 text-center text-body-sm text-on-surface-variant">Loading transactions…</td>
+                  </tr>
+                )}
+                {!txnsLoading && txns.length === 0 && (
+                  <tr>
+                    <td colSpan={6} className="px-4 py-6 text-center text-body-sm text-on-surface-variant">No transactions yet.</td>
+                  </tr>
+                )}
+                {!txnsLoading && txns.map((txn) => (
+                  <tr key={txn.id} className="text-data-tabular text-on-surface tabular-nums">
+                    <td className="px-4 py-3">{fmtDate(txn.date)}</td>
                     <td className="px-4 py-3">
                       <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-surface-container-high text-on-surface-variant text-[10px] font-bold">
                         {txn.action}
                       </span>
                     </td>
-                    <td className="px-4 py-3 text-right">{txn.quantity}</td>
-                    <td className="px-4 py-3 text-right">{txn.price}</td>
-                    <td
-                      className={`px-4 py-3 text-right ${
-                        txn.amountDir === 'positive'
-                          ? 'text-secondary'
-                          : txn.amountDir === 'negative'
-                          ? 'text-error'
-                          : 'text-on-surface'
-                      }`}
-                    >
-                      {txn.amount}
+                    <td className="px-4 py-3 text-right">{txn.quantity != null ? fmtNumber(txn.quantity) : '—'}</td>
+                    <td className="px-4 py-3 text-right">{txn.price != null ? fmtCurrency(txn.price) : '—'}</td>
+                    <td className={`px-4 py-3 text-right ${txn.amount < 0 ? 'text-error' : txn.amount > 0 ? 'text-secondary' : 'text-on-surface'}`}>
+                      {fmtSignedCurrency(txn.amount)}
                     </td>
-                    {rowActions()}
+                    <td className="px-4 py-3 text-right w-10">
+                      <RowMenu onEdit={() => onEditTransaction(txn)} onDelete={() => deleteTxn.mutate(txn.id)} />
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -572,28 +593,30 @@ function EditHoldingModal({ holding, onClose }: { holding: ApiHolding | null; on
 
 // ── Row action menu ───────────────────────────────────────────────────────────
 
-function RowMenu({ onEdit }: { onEdit: () => void }) {
+function RowMenu({ onEdit, onDelete }: { onEdit: () => void; onDelete?: () => void }) {
   const [open, setOpen] = useState(false)
+  const [confirmingDelete, setConfirmingDelete] = useState(false)
   const [pos, setPos] = useState({ top: 0, right: 0 })
   const btnRef = useRef<HTMLButtonElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)
+
+  const closeMenu = () => { setOpen(false); setConfirmingDelete(false) }
 
   useEffect(() => {
     if (!open) return
     function handler(e: MouseEvent) {
       if (btnRef.current?.contains(e.target as Node)) return
       if (menuRef.current?.contains(e.target as Node)) return
-      setOpen(false)
+      closeMenu()
     }
     // The menu is fixed-positioned, so close it if the page scrolls or resizes
-    function close() { setOpen(false) }
     document.addEventListener('mousedown', handler)
-    window.addEventListener('scroll', close, true)
-    window.addEventListener('resize', close)
+    window.addEventListener('scroll', closeMenu, true)
+    window.addEventListener('resize', closeMenu)
     return () => {
       document.removeEventListener('mousedown', handler)
-      window.removeEventListener('scroll', close, true)
-      window.removeEventListener('resize', close)
+      window.removeEventListener('scroll', closeMenu, true)
+      window.removeEventListener('resize', closeMenu)
     }
   }, [open])
 
@@ -602,6 +625,7 @@ function RowMenu({ onEdit }: { onEdit: () => void }) {
       const rect = btnRef.current.getBoundingClientRect()
       setPos({ top: rect.bottom + 4, right: window.innerWidth - rect.right })
     }
+    setConfirmingDelete(false)
     setOpen((v) => !v)
   }
 
@@ -620,15 +644,27 @@ function RowMenu({ onEdit }: { onEdit: () => void }) {
         <div
           ref={menuRef}
           style={{ top: pos.top, right: pos.right }}
-          className="fixed z-40 w-36 bg-surface-container-lowest rounded-lg shadow-card border border-outline-variant py-1"
+          className="fixed z-40 w-40 bg-surface-container-lowest rounded-lg shadow-card border border-outline-variant py-1"
         >
           <button
-            onClick={() => { setOpen(false); onEdit() }}
+            onClick={() => { closeMenu(); onEdit() }}
             className="w-full flex items-center gap-2 px-3 py-2 text-body-md text-on-surface hover:bg-surface-container-low transition-colors"
           >
             <span className="material-symbols-outlined text-base">edit</span>
             Edit
           </button>
+          {onDelete && (
+            <button
+              onClick={() => {
+                if (confirmingDelete) { closeMenu(); onDelete() }
+                else setConfirmingDelete(true)
+              }}
+              className="w-full flex items-center gap-2 px-3 py-2 text-body-md text-error hover:bg-surface-container-low transition-colors"
+            >
+              <span className="material-symbols-outlined text-base">delete</span>
+              {confirmingDelete ? 'Confirm delete' : 'Delete'}
+            </button>
+          )}
         </div>,
         document.body,
       )}
@@ -890,6 +926,333 @@ function EditTaxLotModal({ lot, onClose }: { lot: ApiTaxLot | null; onClose: () 
   )
 }
 
+// ── Add transaction modal ─────────────────────────────────────────────────────
+
+const TRANSACTION_ACTIONS = ['Buy', 'Sell', 'Dividend', 'Interest', 'Fee', 'Deposit', 'Withdrawal', 'Other']
+
+// The add form only handles trades for now (buy/sell of an asset), where the
+// amount is derived from quantity x price rather than entered directly.
+const TRADE_ACTIONS = ['Buy', 'Sell']
+
+function AddTransactionModal({ holding, onClose }: { holding: { id: string; symbol: string } | null; onClose: () => void }) {
+  const queryClient = useQueryClient()
+  const { data: accountsData } = useQuery({
+    queryKey: ['accounts', 'select'],
+    queryFn: () => getAccounts(1, 100),
+    enabled: holding !== null,
+  })
+  const accounts = accountsData?.data ?? []
+
+  const [accountId, setAccountId] = useState('')
+  const [action, setAction] = useState('Buy')
+  const [date, setDate] = useState('')
+  const [quantity, setQuantity] = useState('')
+  const [price, setPrice] = useState('')
+  const [commission, setCommission] = useState('')
+  const [fees, setFees] = useState('')
+
+  const { mutate, isPending, error, reset } = useMutation({
+    mutationFn: createTransaction,
+    onSuccess: () => {
+      // A buy also opens a tax lot and recomputes the holding, so refresh all
+      // three lists.
+      queryClient.invalidateQueries({ queryKey: ['transactions'] })
+      queryClient.invalidateQueries({ queryKey: ['tax-lots'] })
+      queryClient.invalidateQueries({ queryKey: ['holdings'] })
+      setAccountId(''); setAction('Buy'); setDate('')
+      setQuantity(''); setPrice(''); setCommission(''); setFees('')
+      reset()
+      onClose()
+    },
+  })
+
+  if (!holding) return null
+
+  const holdingId = holding.id
+  const symbol = holding.symbol === '—' ? '' : holding.symbol
+  const effectiveAccountId = accountId || accounts[0]?.id || ''
+  const qtyNum = parseFloat(quantity) || 0
+  const priceNum = parseFloat(price) || 0
+  // Buy is cash out (negative); sell is cash in (positive).
+  const computedAmount = action === 'Sell' ? qtyNum * priceNum : -(qtyNum * priceNum)
+  const canSubmit = effectiveAccountId !== '' && date !== '' && qtyNum > 0 && priceNum > 0
+
+  function submit() {
+    mutate({
+      account_id: effectiveAccountId,
+      holding_id: holdingId,
+      symbol,
+      action,
+      date,
+      quantity: qtyNum,
+      price: priceNum,
+      amount: computedAmount,
+      commission: parseFloat(commission) || 0,
+      fees: parseFloat(fees) || 0,
+    })
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4" onClick={onClose}>
+      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" />
+      <div
+        className="relative bg-surface-container-lowest rounded-xl shadow-card w-full max-w-md p-6"
+        onClick={(e) => e.stopPropagation()}
+        style={{ animation: 'slideUp 0.25s ease-out' }}
+      >
+        <div className="flex items-start justify-between mb-6">
+          <div>
+            <h2 className="text-headline-sm text-on-surface">Add Transaction</h2>
+            <p className="text-label-sm text-on-surface-variant">{holding.symbol}</p>
+          </div>
+          <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-lg text-on-surface-variant hover:bg-surface-container-high transition-colors">
+            <span className="material-symbols-outlined text-xl">close</span>
+          </button>
+        </div>
+
+        <div className="space-y-4">
+          <div>
+            <label className="block text-label-sm font-semibold text-on-surface mb-1.5">Account</label>
+            {accounts.length === 0 ? (
+              <p className="text-body-sm text-on-surface-variant">No accounts yet — create one first.</p>
+            ) : (
+              <select value={effectiveAccountId} onChange={(e) => setAccountId(e.target.value)} className={modalInputCls}>
+                {accounts.map((a) => <option key={a.id} value={a.id}>{a.account_name}</option>)}
+              </select>
+            )}
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-label-sm font-semibold text-on-surface mb-1.5">Action</label>
+              <select value={action} onChange={(e) => setAction(e.target.value)} className={modalInputCls}>
+                {TRADE_ACTIONS.map((a) => <option key={a}>{a}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-label-sm font-semibold text-on-surface mb-1.5">Date</label>
+              <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className={modalInputCls} />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-label-sm font-semibold text-on-surface mb-1.5">Quantity</label>
+              <input type="number" value={quantity} onChange={(e) => setQuantity(e.target.value)} placeholder="0.00" className={modalNumInputCls} />
+            </div>
+            <div>
+              <label className="block text-label-sm font-semibold text-on-surface mb-1.5">Price</label>
+              <div className="relative">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-body-md text-on-surface-variant">$</span>
+                <input type="number" value={price} onChange={(e) => setPrice(e.target.value)} placeholder="0.00" className={`${modalNumInputCls} pl-7`} />
+              </div>
+            </div>
+          </div>
+
+          <div className="rounded-lg bg-surface-container-low px-3 py-2.5 flex items-center justify-between">
+            <span className="text-label-sm font-semibold text-on-surface">Amount <span className="font-normal text-on-surface-variant">(qty × price)</span></span>
+            <span className={`text-data-tabular font-semibold tabular-nums ${computedAmount < 0 ? 'text-error' : computedAmount > 0 ? 'text-secondary' : 'text-on-surface'}`}>
+              {fmtSignedCurrency(computedAmount)}
+            </span>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-label-sm font-semibold text-on-surface mb-1.5">Commission</label>
+              <div className="relative">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-body-md text-on-surface-variant">$</span>
+                <input type="number" value={commission} onChange={(e) => setCommission(e.target.value)} placeholder="0.00" className={`${modalNumInputCls} pl-7`} />
+              </div>
+            </div>
+            <div>
+              <label className="block text-label-sm font-semibold text-on-surface mb-1.5">Fees</label>
+              <div className="relative">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-body-md text-on-surface-variant">$</span>
+                <input type="number" value={fees} onChange={(e) => setFees(e.target.value)} placeholder="0.00" className={`${modalNumInputCls} pl-7`} />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {error && <p className="mt-4 text-body-sm text-error">{(error as Error).message}</p>}
+
+        <div className="flex gap-3 mt-6">
+          <button onClick={onClose} disabled={isPending} className="flex-1 px-4 py-2.5 border border-outline-variant rounded-lg text-body-md text-on-surface hover:bg-surface-container-high transition-colors disabled:opacity-50">
+            Cancel
+          </button>
+          <button
+            onClick={submit}
+            disabled={isPending || !canSubmit}
+            className="flex-1 px-4 py-2.5 bg-primary text-on-primary rounded-lg text-body-md font-semibold hover:opacity-90 transition-opacity disabled:opacity-50"
+          >
+            {isPending ? 'Saving…' : 'Add Transaction'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── Edit transaction modal ────────────────────────────────────────────────────
+
+function EditTransactionModal({ txn, onClose }: { txn: ApiTransaction | null; onClose: () => void }) {
+  const queryClient = useQueryClient()
+  const { data: accountsData } = useQuery({
+    queryKey: ['accounts', 'select'],
+    queryFn: () => getAccounts(1, 100),
+    enabled: txn !== null,
+  })
+  const accounts = accountsData?.data ?? []
+
+  // Seeded from the txn; parent remounts per txn via a `key`, so no sync effect.
+  const [accountId, setAccountId] = useState(txn?.account_id ?? '')
+  const [action, setAction] = useState(txn?.action ?? 'Buy')
+  const [date, setDate] = useState(txn ? txn.date.slice(0, 10) : '')
+  const [quantity, setQuantity] = useState(txn?.quantity != null ? String(txn.quantity) : '')
+  const [price, setPrice] = useState(txn?.price != null ? String(txn.price) : '')
+  const [amount, setAmount] = useState(txn != null ? String(txn.amount) : '')
+  const [commission, setCommission] = useState(txn != null ? String(txn.commission) : '')
+  const [fees, setFees] = useState(txn != null ? String(txn.fees) : '')
+
+  const { mutate, isPending, error } = useMutation({
+    mutationFn: ({ id, payload }: { id: string; payload: Parameters<typeof updateTransaction>[1] }) =>
+      updateTransaction(id, payload),
+    onSuccess: () => {
+      // Editing a sell re-derives lot depletion and the holding aggregates.
+      queryClient.invalidateQueries({ queryKey: ['transactions'] })
+      queryClient.invalidateQueries({ queryKey: ['tax-lots'] })
+      queryClient.invalidateQueries({ queryKey: ['holdings'] })
+      onClose()
+    },
+  })
+
+  if (!txn) return null
+
+  const txnId = txn.id
+  // Keep the current action selectable even if it isn't one of the presets
+  // (e.g. an imported "YOU BOUGHT ..." action).
+  const actionOptions = TRANSACTION_ACTIONS.includes(action) ? TRANSACTION_ACTIONS : [action, ...TRANSACTION_ACTIONS]
+  const canSubmit = accountId !== '' && action !== '' && date !== '' && amount.trim() !== ''
+
+  function submit() {
+    mutate({
+      id: txnId,
+      payload: {
+        account_id: accountId,
+        action,
+        date,
+        quantity: quantity.trim() === '' ? null : parseFloat(quantity),
+        price: price.trim() === '' ? null : parseFloat(price),
+        amount: parseFloat(amount) || 0,
+        commission: parseFloat(commission) || 0,
+        fees: parseFloat(fees) || 0,
+      },
+    })
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4" onClick={onClose}>
+      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" />
+      <div
+        className="relative bg-surface-container-lowest rounded-xl shadow-card w-full max-w-md p-6"
+        onClick={(e) => e.stopPropagation()}
+        style={{ animation: 'slideUp 0.25s ease-out' }}
+      >
+        <div className="flex items-start justify-between mb-6">
+          <div>
+            <h2 className="text-headline-sm text-on-surface">Edit Transaction</h2>
+            <p className="text-label-sm text-on-surface-variant">{txn.symbol || '—'}</p>
+          </div>
+          <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-lg text-on-surface-variant hover:bg-surface-container-high transition-colors">
+            <span className="material-symbols-outlined text-xl">close</span>
+          </button>
+        </div>
+
+        <div className="space-y-4">
+          <div>
+            <label className="block text-label-sm font-semibold text-on-surface mb-1.5">Account</label>
+            {accounts.length === 0 ? (
+              <p className="text-body-sm text-on-surface-variant">No accounts yet — create one first.</p>
+            ) : (
+              <select value={accountId} onChange={(e) => setAccountId(e.target.value)} className={modalInputCls}>
+                {accounts.map((a) => <option key={a.id} value={a.id}>{a.account_name}</option>)}
+              </select>
+            )}
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-label-sm font-semibold text-on-surface mb-1.5">Action</label>
+              <select value={action} onChange={(e) => setAction(e.target.value)} className={modalInputCls}>
+                {actionOptions.map((a) => <option key={a}>{a}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-label-sm font-semibold text-on-surface mb-1.5">Date</label>
+              <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className={modalInputCls} />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-label-sm font-semibold text-on-surface mb-1.5">Quantity</label>
+              <input type="number" value={quantity} onChange={(e) => setQuantity(e.target.value)} placeholder="—" className={modalNumInputCls} />
+            </div>
+            <div>
+              <label className="block text-label-sm font-semibold text-on-surface mb-1.5">Price</label>
+              <div className="relative">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-body-md text-on-surface-variant">$</span>
+                <input type="number" value={price} onChange={(e) => setPrice(e.target.value)} placeholder="—" className={`${modalNumInputCls} pl-7`} />
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-label-sm font-semibold text-on-surface mb-1.5">Amount</label>
+            <div className="relative">
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-body-md text-on-surface-variant">$</span>
+              <input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0.00" className={`${modalNumInputCls} pl-7`} />
+            </div>
+            <p className="mt-1 text-label-sm text-on-surface-variant">Negative for cash out (buys, fees); positive for cash in.</p>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-label-sm font-semibold text-on-surface mb-1.5">Commission</label>
+              <div className="relative">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-body-md text-on-surface-variant">$</span>
+                <input type="number" value={commission} onChange={(e) => setCommission(e.target.value)} placeholder="0.00" className={`${modalNumInputCls} pl-7`} />
+              </div>
+            </div>
+            <div>
+              <label className="block text-label-sm font-semibold text-on-surface mb-1.5">Fees</label>
+              <div className="relative">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-body-md text-on-surface-variant">$</span>
+                <input type="number" value={fees} onChange={(e) => setFees(e.target.value)} placeholder="0.00" className={`${modalNumInputCls} pl-7`} />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {error && <p className="mt-4 text-body-sm text-error">{(error as Error).message}</p>}
+
+        <div className="flex gap-3 mt-6">
+          <button onClick={onClose} disabled={isPending} className="flex-1 px-4 py-2.5 border border-outline-variant rounded-lg text-body-md text-on-surface hover:bg-surface-container-high transition-colors disabled:opacity-50">
+            Cancel
+          </button>
+          <button
+            onClick={submit}
+            disabled={isPending || !canSubmit}
+            className="flex-1 px-4 py-2.5 bg-primary text-on-primary rounded-lg text-body-md font-semibold hover:opacity-90 transition-opacity disabled:opacity-50"
+          >
+            {isPending ? 'Saving…' : 'Save Changes'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default function Portfolio() {
   const [mounted, setMounted] = useState(false)
   const [sortBy, setSortBy] = useState('Market Value High to Low')
@@ -900,6 +1263,8 @@ export default function Portfolio() {
   const [editingHolding, setEditingHolding] = useState<ApiHolding | null>(null)
   const [addLotHolding, setAddLotHolding] = useState<{ id: string; symbol: string } | null>(null)
   const [editingLot, setEditingLot] = useState<ApiTaxLot | null>(null)
+  const [addTxnHolding, setAddTxnHolding] = useState<{ id: string; symbol: string } | null>(null)
+  const [editingTxn, setEditingTxn] = useState<ApiTransaction | null>(null)
 
   const { data, isLoading, isError, error } = useQuery({
     queryKey: ['holdings', pagination.pageIndex, pagination.pageSize],
@@ -1138,6 +1503,8 @@ export default function Portfolio() {
                               onTabChange={setActiveTab}
                               onAddLot={() => setAddLotHolding({ id: h.id, symbol: h.symbol })}
                               onEditLot={setEditingLot}
+                              onAddTransaction={() => setAddTxnHolding({ id: h.id, symbol: h.symbol })}
+                              onEditTransaction={setEditingTxn}
                             />
                           </td>
                         </tr>
@@ -1189,6 +1556,8 @@ export default function Portfolio() {
       <EditHoldingModal key={editingHolding?.id} holding={editingHolding} onClose={() => setEditingHolding(null)} />
       <AddTaxLotModal key={addLotHolding?.id} holding={addLotHolding} onClose={() => setAddLotHolding(null)} />
       <EditTaxLotModal key={editingLot?.id} lot={editingLot} onClose={() => setEditingLot(null)} />
+      <AddTransactionModal key={addTxnHolding?.id} holding={addTxnHolding} onClose={() => setAddTxnHolding(null)} />
+      <EditTransactionModal key={editingTxn?.id} txn={editingTxn} onClose={() => setEditingTxn(null)} />
     </>
   )
 }

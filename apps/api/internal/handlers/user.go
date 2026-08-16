@@ -10,6 +10,7 @@ import (
 
 type UserHandler interface {
 	GetUsers(c *gin.Context)
+	CreateUser(c *gin.Context)
 }
 
 type userHandler struct {
@@ -27,4 +28,35 @@ func (h *userHandler) GetUsers(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, users)
+}
+
+type createUserRequest struct {
+	FirstName string `json:"first_name" binding:"required"`
+	LastName  string `json:"last_name" binding:"required"`
+} // @name CreateUserRequest
+
+// CreateUser godoc
+// @Summary      Create a user
+// @Tags         users
+// @Accept       json
+// @Produce      json
+// @Param        user  body      createUserRequest  true  "User payload"
+// @Success      201   {object}  models.User
+// @Failure      400   {object}  map[string]string
+// @Failure      500   {object}  map[string]string
+// @Router       /users [post]
+func (h *userHandler) CreateUser(c *gin.Context) {
+	var req createUserRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	user := models.User{FirstName: req.FirstName, LastName: req.LastName}
+	if err := h.db.Create(&user).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create user"})
+		return
+	}
+
+	c.JSON(http.StatusCreated, user)
 }

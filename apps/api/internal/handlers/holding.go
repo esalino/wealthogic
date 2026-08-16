@@ -147,6 +147,9 @@ func (h *holdingHandler) UpdateHolding(c *gin.Context) {
 	holding.CostBasisTotal = req.CostBasisTotal
 	holding.DividendIncome = req.DividendIncome
 
+	holding.GainUnrealizedAmount = holding.CurrentValue - holding.CostBasisTotal
+	holding.GainUnrealizedPercent = holding.GainUnrealizedAmount / holding.CostBasisTotal * 100
+
 	if err := h.db.Save(&holding).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update holding"})
 		return

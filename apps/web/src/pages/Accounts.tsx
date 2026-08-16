@@ -9,7 +9,7 @@ import {
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useOutletContext } from 'react-router-dom'
 import { type Account, createAccount, getAccounts, updateAccount } from '../api/accounts'
-import { getUsers } from '../api/users'
+import { createUser, getUsers } from '../api/users'
 
 interface OutletCtx {
   addAccountOpen: boolean
@@ -49,6 +49,20 @@ function AccountFormFields({
 }: AccountFormFieldsProps) {
   const inputCls = 'w-full px-3 py-2.5 bg-surface-container-low border border-outline-variant rounded-lg text-body-md text-on-surface placeholder:text-on-surface-variant focus:outline-none focus:ring-2 focus:ring-secondary/30 focus:border-secondary transition-colors'
 
+  const queryClient = useQueryClient()
+  const [showAddOwner, setShowAddOwner] = useState(false)
+  const [newFirst, setNewFirst] = useState('')
+  const [newLast, setNewLast] = useState('')
+
+  const createUserMut = useMutation({
+    mutationFn: createUser,
+    onSuccess: (user) => {
+      queryClient.invalidateQueries({ queryKey: ['users'] })
+      toggleOwner(user.id) // auto-select the newly added owner
+      setNewFirst(''); setNewLast(''); setShowAddOwner(false)
+    },
+  })
+
   return (
     <div className="space-y-4">
       <div>
@@ -83,9 +97,9 @@ function AccountFormFields({
         </select>
       </div>
 
-      {users.length > 0 && (
-        <div>
-          <label className="block text-label-sm font-semibold text-on-surface mb-1.5">Owners</label>
+      <div>
+        <label className="block text-label-sm font-semibold text-on-surface mb-1.5">Owners</label>
+        {users.length > 0 && (
           <div className="space-y-1.5">
             {users.map((user) => (
               <label
@@ -102,8 +116,56 @@ function AccountFormFields({
               </label>
             ))}
           </div>
-        </div>
-      )}
+        )}
+
+        {showAddOwner ? (
+          <div className="mt-2 space-y-2">
+            <div className="grid grid-cols-2 gap-2">
+              <input
+                type="text"
+                value={newFirst}
+                onChange={(e) => setNewFirst(e.target.value)}
+                placeholder="First name"
+                className={inputCls}
+              />
+              <input
+                type="text"
+                value={newLast}
+                onChange={(e) => setNewLast(e.target.value)}
+                placeholder="Last name"
+                className={inputCls}
+              />
+            </div>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => createUserMut.mutate({ first_name: newFirst.trim(), last_name: newLast.trim() })}
+                disabled={createUserMut.isPending || !newFirst.trim() || !newLast.trim()}
+                className="px-3 py-1.5 bg-primary text-on-primary rounded-lg text-label-sm font-semibold hover:opacity-90 transition-opacity disabled:opacity-50"
+              >
+                {createUserMut.isPending ? 'Adding…' : 'Add'}
+              </button>
+              <button
+                type="button"
+                onClick={() => { setShowAddOwner(false); setNewFirst(''); setNewLast('') }}
+                className="px-3 py-1.5 border border-outline-variant rounded-lg text-label-sm text-on-surface hover:bg-surface-container-high transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+            {createUserMut.error && <p className="text-body-sm text-error">{(createUserMut.error as Error).message}</p>}
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setShowAddOwner(true)}
+            className="mt-1 flex items-center gap-1 text-label-sm font-semibold text-secondary hover:opacity-80 transition-opacity"
+          >
+            <span className="material-symbols-outlined text-base">add</span>
+            Add owner
+          </button>
+        )}
+      </div>
 
       <div>
         <label className="block text-label-sm font-semibold text-on-surface mb-1.5">Balance</label>

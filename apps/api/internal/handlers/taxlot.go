@@ -200,9 +200,10 @@ func (h *taxLotHandler) CreateTaxLot(c *gin.Context) {
 	c.JSON(http.StatusCreated, taxLotWithTransaction{TaxLot: lot, Transaction: txn})
 }
 
-// recalcHoldingFromLots recomputes a holding's position aggregates from its
-// open tax lots (remaining_quantity > 0) and saves them. Realized gains and
-// dividend income aren't derived from open lots, so they're left untouched.
+// recalcHoldingFromLots recomputes a holding's aggregates and saves them:
+// position (quantity, cost basis, current value, unrealized gain) from its open
+// tax lots, and realized gain from the sells recorded against it. Dividend
+// income isn't derived here, so it's left untouched.
 func recalcHoldingFromLots(tx *gorm.DB, holding *models.Holding) error {
 	var lots []models.TaxLot
 	if err := tx.Where("holding_id = ? AND remaining_quantity > 0", holding.ID).Find(&lots).Error; err != nil {
@@ -229,6 +230,26 @@ func recalcHoldingFromLots(tx *gorm.DB, holding *models.Holding) error {
 		holding.GainUnrealizedPercent = (holding.GainUnrealizedAmount / costBasisTotal) * 100
 	} else {
 		holding.GainUnrealizedPercent = 0
+	}
+
+	// Realized gains come from sells recorded against this holding. Each sell's
+	// amount is the proceeds (qty x price) and realized_gains is the gain, so
+	// the cost basis of the shares sold is proceeds minus the gain. Realized
+	// percent is the total gain over that cost basis.
+	var sells []models.Transaction
+	if err := tx.Where("holding_id = ? AND LOWER(action) = ?", holding.ID, "sell").Find(&sells).Error; err != nil {
+		return err
+	}
+	var realizedAmount, realizedCostBasis float64
+	for _, sell := range sells {
+		realizedAmount += sell.RealizedGains
+		realizedCostBasis += sell.Amount - sell.RealizedGains
+	}
+	holding.GainRealizedAmount = realizedAmount
+	if realizedCostBasis > 0 {
+		holding.GainRealizedPercent = (realizedAmount / realizedCostBasis) * 100
+	} else {
+		holding.GainRealizedPercent = 0
 	}
 
 	return tx.Save(holding).Error

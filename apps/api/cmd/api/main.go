@@ -65,7 +65,10 @@ func main() {
 	r.PATCH("/tax-lots/:id", taxLotHandler.UpdateTaxLot)
 	r.GET("/transactions", transactionHandler.GetTransactions)
 	r.POST("/transactions", transactionHandler.CreateTransaction)
+	r.PATCH("/transactions/:id", transactionHandler.UpdateTransaction)
+	r.DELETE("/transactions/:id", transactionHandler.DeleteTransaction)
 	r.GET("/users", userHandler.GetUsers)
+	r.POST("/users", userHandler.CreateUser)
 	r.POST("/uploads", uploadHandler.Upload)
 
 	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))

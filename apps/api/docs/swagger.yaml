@@ -128,6 +128,16 @@ definitions:
     - action
     - date
     type: object
+  CreateUserRequest:
+    properties:
+      first_name:
+        type: string
+      last_name:
+        type: string
+    required:
+    - first_name
+    - last_name
+    type: object
   Holding:
     properties:
       asset_type:
@@ -333,6 +343,28 @@ definitions:
     - purchase_date
     - purchase_price
     - purchase_quantity
+    type: object
+  UpdateTransactionRequest:
+    properties:
+      account_id:
+        type: string
+      action:
+        type: string
+      amount:
+        type: number
+      commission:
+        type: number
+      date:
+        type: string
+      fees:
+        type: number
+      price:
+        type: number
+      quantity:
+        type: number
+    required:
+    - action
+    - date
     type: object
   UploadResult:
     properties:
@@ -653,6 +685,10 @@ paths:
         in: query
         name: page_size
         type: integer
+      - description: Filter to a single holding
+        in: query
+        name: holding_id
+        type: string
       produces:
       - application/json
       responses:
@@ -660,6 +696,12 @@ paths:
           description: OK
           schema:
             $ref: '#/definitions/PaginatedTransactions'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
         "500":
           description: Internal Server Error
           schema:
@@ -699,6 +741,89 @@ paths:
               type: string
             type: object
       summary: Create a transaction
+      tags:
+      - transactions
+  /transactions/{id}:
+    delete:
+      description: Soft-deletes the transaction; if it belongs to a holding, the holding's
+        lots and aggregates are rebuilt from its remaining buys and sells. A buy's
+        own lot is not removed.
+      parameters:
+      - description: Transaction ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: No Content
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Delete a transaction
+      tags:
+      - transactions
+    patch:
+      consumes:
+      - application/json
+      description: Updates the transaction; if it belongs to a holding, the holding's
+        lots and aggregates are rebuilt from its buys and sells. A buy's own lot is
+        not changed.
+      parameters:
+      - description: Transaction ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Transaction payload
+        in: body
+        name: transaction
+        required: true
+        schema:
+          $ref: '#/definitions/UpdateTransactionRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/Transaction'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Update a transaction
       tags:
       - transactions
   /uploads:
@@ -749,4 +874,37 @@ paths:
       summary: Upload a data file for import
       tags:
       - uploads
+  /users:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: User payload
+        in: body
+        name: user
+        required: true
+        schema:
+          $ref: '#/definitions/CreateUserRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/User'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Create a user
+      tags:
+      - users
 swagger: "2.0"
