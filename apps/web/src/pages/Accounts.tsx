@@ -10,6 +10,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useOutletContext } from 'react-router-dom'
 import { type Account, createAccount, getAccounts, updateAccount } from '../api/accounts'
 import { createUser, getUsers } from '../api/users'
+import { uploadFile } from '../api/uploads'
 
 interface OutletCtx {
   addAccountOpen: boolean
@@ -353,7 +354,7 @@ function EditAccountModal({ account, onClose }: EditAccountModalProps) {
 
 // ── Row action menu ───────────────────────────────────────────────────────────
 
-function RowMenu({ onEdit }: { onEdit: () => void }) {
+function RowMenu({ onEdit, onUpload }: { onEdit: () => void; onUpload: () => void }) {
   const [open, setOpen] = useState(false)
   const [pos, setPos] = useState({ top: 0, right: 0 })
   const btnRef = useRef<HTMLButtonElement>(null)
@@ -409,9 +410,122 @@ function RowMenu({ onEdit }: { onEdit: () => void }) {
             <span className="material-symbols-outlined text-base">edit</span>
             Edit
           </button>
+          <button
+            onClick={() => { setOpen(false); onUpload() }}
+            className="w-full flex items-center gap-2 px-3 py-2 text-body-md text-on-surface hover:bg-surface-container-low transition-colors"
+          >
+            <span className="material-symbols-outlined text-base">upload_file</span>
+            Upload data
+          </button>
         </div>,
         document.body,
       )}
+    </div>
+  )
+}
+
+// ── Upload modal ──────────────────────────────────────────────────────────────
+
+const FILE_TYPES = [
+  { value: 'holdings', label: 'Holdings' },
+  { value: 'transactions', label: 'Transactions' },
+]
+const INSTITUTIONS = [{ value: 'fidelity', label: 'Fidelity' }]
+
+function UploadAccountModal({ account, onClose }: { account: Account | null; onClose: () => void }) {
+  const queryClient = useQueryClient()
+  const [fileType, setFileType] = useState('holdings')
+  const [institution, setInstitution] = useState('fidelity')
+  const [file, setFile] = useState<File | null>(null)
+
+  const { mutate, isPending, error, data: result, reset } = useMutation({
+    mutationFn: uploadFile,
+    onSuccess: () => {
+      // An import can create holdings, transactions and tax lots.
+      queryClient.invalidateQueries({ queryKey: ['holdings'] })
+      queryClient.invalidateQueries({ queryKey: ['transactions'] })
+      queryClient.invalidateQueries({ queryKey: ['tax-lots'] })
+    },
+  })
+
+  if (!account) return null
+
+  const inputCls = 'w-full px-3 py-2.5 bg-surface-container-low border border-outline-variant rounded-lg text-body-md text-on-surface focus:outline-none focus:ring-2 focus:ring-secondary/30 focus:border-secondary transition-colors'
+
+  function submit() {
+    if (!file) return
+    mutate({ file, fileType, accountType: institution, accountId: account!.id })
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4" onClick={onClose}>
+      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" />
+      <div
+        className="relative bg-surface-container-lowest rounded-xl shadow-card w-full max-w-md p-6"
+        onClick={(e) => e.stopPropagation()}
+        style={{ animation: 'slideUp 0.25s ease-out' }}
+      >
+        <div className="flex items-start justify-between mb-6">
+          <div>
+            <h2 className="text-headline-sm text-on-surface">Upload Data</h2>
+            <p className="text-label-sm text-on-surface-variant">{account.account_name}</p>
+          </div>
+          <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-lg text-on-surface-variant hover:bg-surface-container-high transition-colors">
+            <span className="material-symbols-outlined text-xl">close</span>
+          </button>
+        </div>
+
+        <div className="space-y-4">
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-label-sm font-semibold text-on-surface mb-1.5">Data Type</label>
+              <select value={fileType} onChange={(e) => { setFileType(e.target.value); reset() }} className={inputCls}>
+                {FILE_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-label-sm font-semibold text-on-surface mb-1.5">Institution</label>
+              <select value={institution} onChange={(e) => setInstitution(e.target.value)} className={inputCls}>
+                {INSTITUTIONS.map((i) => <option key={i.value} value={i.value}>{i.label}</option>)}
+              </select>
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-label-sm font-semibold text-on-surface mb-1.5">File</label>
+            <label className="flex items-center gap-2 px-3 py-2.5 border border-dashed border-outline-variant rounded-lg cursor-pointer hover:bg-surface-container-low transition-colors">
+              <span className="material-symbols-outlined text-xl text-on-surface-variant">folder_open</span>
+              <span className="text-body-md text-on-surface-variant truncate">{file ? file.name : 'Choose a CSV file'}</span>
+              <input
+                type="file"
+                accept=".csv"
+                className="hidden"
+                onChange={(e) => { setFile(e.target.files?.[0] ?? null); reset() }}
+              />
+            </label>
+          </div>
+
+          {result && (
+            <div className="rounded-lg bg-secondary-container px-3 py-2.5 text-body-sm text-on-secondary-container">
+              Imported: {result.created} created, {result.updated} updated, {result.skipped} skipped.
+            </div>
+          )}
+          {error && <p className="text-body-sm text-error">{(error as Error).message}</p>}
+        </div>
+
+        <div className="flex gap-3 mt-6">
+          <button onClick={onClose} disabled={isPending} className="flex-1 px-4 py-2.5 border border-outline-variant rounded-lg text-body-md text-on-surface hover:bg-surface-container-high transition-colors disabled:opacity-50">
+            {result ? 'Close' : 'Cancel'}
+          </button>
+          <button
+            onClick={submit}
+            disabled={isPending || !file}
+            className="flex-1 px-4 py-2.5 bg-primary text-on-primary rounded-lg text-body-md font-semibold hover:opacity-90 transition-opacity disabled:opacity-50"
+          >
+            {isPending ? 'Importing…' : 'Import'}
+          </button>
+        </div>
+      </div>
     </div>
   )
 }
@@ -423,6 +537,7 @@ const columnHelper = createColumnHelper<Account>()
 export default function Accounts() {
   const { addAccountOpen, setAddAccountOpen } = useOutletContext<OutletCtx>()
   const [editingAccount, setEditingAccount] = useState<Account | null>(null)
+  const [uploadAccount, setUploadAccount] = useState<Account | null>(null)
   const [pagination, setPagination] = useState({ pageIndex: 0, pageSize: 20 })
 
   const { data, isLoading, isError } = useQuery({
@@ -468,7 +583,12 @@ export default function Accounts() {
     }),
     columnHelper.display({
       id: 'actions',
-      cell: (info) => <RowMenu onEdit={() => setEditingAccount(info.row.original)} />,
+      cell: (info) => (
+        <RowMenu
+          onEdit={() => setEditingAccount(info.row.original)}
+          onUpload={() => setUploadAccount(info.row.original)}
+        />
+      ),
     }),
   ]
 
@@ -602,6 +722,7 @@ export default function Accounts() {
 
       <AddAccountModal isOpen={addAccountOpen} onClose={() => setAddAccountOpen(false)} />
       <EditAccountModal account={editingAccount} onClose={() => setEditingAccount(null)} />
+      <UploadAccountModal key={uploadAccount?.id} account={uploadAccount} onClose={() => setUploadAccount(null)} />
 
       <style>{`
         @keyframes slideUp {
