@@ -70,6 +70,8 @@ func main() {
 	r.GET("/users", userHandler.GetUsers)
 	r.POST("/users", userHandler.CreateUser)
 	r.POST("/uploads", uploadHandler.Upload)
+	r.GET("/uploads", uploadHandler.GetUploads)
+	r.GET("/upload-transactions", uploadHandler.GetUploadTransactions)
 
 	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
 

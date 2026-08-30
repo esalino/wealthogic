@@ -227,6 +227,32 @@ definitions:
       total:
         type: integer
     type: object
+  PaginatedUploadTransactions:
+    properties:
+      data:
+        items:
+          $ref: '#/definitions/UploadTransaction'
+        type: array
+      page:
+        type: integer
+      page_size:
+        type: integer
+      total:
+        type: integer
+    type: object
+  PaginatedUploads:
+    properties:
+      data:
+        items:
+          $ref: '#/definitions/Upload'
+        type: array
+      page:
+        type: integer
+      page_size:
+        type: integer
+      total:
+        type: integer
+    type: object
   TaxLot:
     properties:
       account_id:
@@ -366,6 +392,26 @@ definitions:
     - action
     - date
     type: object
+  Upload:
+    properties:
+      account_id:
+        type: string
+      created_at:
+        type: string
+      end_date:
+        type: string
+      file_name:
+        type: string
+      id:
+        type: string
+      start_date:
+        description: |-
+          StartDate and EndDate bound the dates of the transactions in the file, so
+          we know the range covered. Nil until the file is parsed.
+        type: string
+      updated_at:
+        type: string
+    type: object
   UploadResult:
     properties:
       created:
@@ -374,6 +420,48 @@ definitions:
         type: integer
       updated:
         type: integer
+    type: object
+  UploadTransaction:
+    properties:
+      action:
+        type: string
+      amount:
+        type: number
+      asset_description:
+        type: string
+      asset_type:
+        type: string
+      commission:
+        type: number
+      created_at:
+        type: string
+      date:
+        type: string
+      fees:
+        type: number
+      id:
+        type: string
+      price:
+        type: number
+      quantity:
+        type: number
+      realized_gains:
+        type: number
+      settlement_date:
+        type: string
+      symbol:
+        type: string
+      transaction_id:
+        description: |-
+          TransactionID links this to its Transaction. A transaction has 0 or 1
+          upload_transaction (enforced by the unique index), and the holding and
+          account can be reached through the transaction.
+        type: string
+      updated_at:
+        type: string
+      upload_id:
+        description: UploadID ties this row to the file import it came from.
+        type: string
     type: object
   User:
     properties:
@@ -826,7 +914,60 @@ paths:
       summary: Update a transaction
       tags:
       - transactions
+  /upload-transactions:
+    get:
+      parameters:
+      - description: Page number (default 1)
+        in: query
+        name: page
+        type: integer
+      - description: Items per page (default 20, max 100)
+        in: query
+        name: page_size
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/PaginatedUploadTransactions'
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: List upload transactions with pagination
+      tags:
+      - uploads
   /uploads:
+    get:
+      parameters:
+      - description: Page number (default 1)
+        in: query
+        name: page
+        type: integer
+      - description: Items per page (default 20, max 100)
+        in: query
+        name: page_size
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/PaginatedUploads'
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: List uploads with pagination
+      tags:
+      - uploads
     post:
       consumes:
       - multipart/form-data

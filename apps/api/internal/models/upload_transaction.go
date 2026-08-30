@@ -32,8 +32,10 @@ type UploadTransaction struct {
 
 	RealizedGains float64 `json:"realized_gains"`
 
-	HoldingID *uuid.UUID `gorm:"type:uuid" json:"holding_id"`
-	AccountID uuid.UUID  `gorm:"type:uuid" json:"account_id"`
+	// TransactionID links this to its Transaction. A transaction has 0 or 1
+	// upload_transaction (enforced by the unique index), and the holding and
+	// account can be reached through the transaction.
+	TransactionID uuid.UUID `gorm:"type:uuid;uniqueIndex" json:"transaction_id"`
 
 	// UploadID ties this row to the file import it came from.
 	UploadID uuid.UUID `gorm:"type:uuid" json:"upload_id"`

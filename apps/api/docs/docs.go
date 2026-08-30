@@ -664,7 +664,89 @@ const docTemplate = `{
                 }
             }
         },
+        "/upload-transactions": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "uploads"
+                ],
+                "summary": "List upload transactions with pagination",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Page number (default 1)",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Items per page (default 20, max 100)",
+                        "name": "page_size",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/PaginatedUploadTransactions"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/uploads": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "uploads"
+                ],
+                "summary": "List uploads with pagination",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Page number (default 1)",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Items per page (default 20, max 100)",
+                        "name": "page_size",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/PaginatedUploads"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            },
             "post": {
                 "description": "Routes the file to a handler selected by file_type + account_type (currently: holdings + fidelity)",
                 "consumes": [
@@ -1130,6 +1212,46 @@ const docTemplate = `{
                 }
             }
         },
+        "PaginatedUploadTransactions": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/UploadTransaction"
+                    }
+                },
+                "page": {
+                    "type": "integer"
+                },
+                "page_size": {
+                    "type": "integer"
+                },
+                "total": {
+                    "type": "integer"
+                }
+            }
+        },
+        "PaginatedUploads": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/Upload"
+                    }
+                },
+                "page": {
+                    "type": "integer"
+                },
+                "page_size": {
+                    "type": "integer"
+                },
+                "total": {
+                    "type": "integer"
+                }
+            }
+        },
         "TaxLot": {
             "type": "object",
             "properties": {
@@ -1330,6 +1452,33 @@ const docTemplate = `{
                 }
             }
         },
+        "Upload": {
+            "type": "object",
+            "properties": {
+                "account_id": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "end_date": {
+                    "type": "string"
+                },
+                "file_name": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "start_date": {
+                    "description": "StartDate and EndDate bound the dates of the transactions in the file, so\nwe know the range covered. Nil until the file is parsed.",
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
         "UploadResult": {
             "type": "object",
             "properties": {
@@ -1341,6 +1490,64 @@ const docTemplate = `{
                 },
                 "updated": {
                     "type": "integer"
+                }
+            }
+        },
+        "UploadTransaction": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string"
+                },
+                "amount": {
+                    "type": "number"
+                },
+                "asset_description": {
+                    "type": "string"
+                },
+                "asset_type": {
+                    "type": "string"
+                },
+                "commission": {
+                    "type": "number"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "date": {
+                    "type": "string"
+                },
+                "fees": {
+                    "type": "number"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "price": {
+                    "type": "number"
+                },
+                "quantity": {
+                    "type": "number"
+                },
+                "realized_gains": {
+                    "type": "number"
+                },
+                "settlement_date": {
+                    "type": "string"
+                },
+                "symbol": {
+                    "type": "string"
+                },
+                "transaction_id": {
+                    "description": "TransactionID links this to its Transaction. A transaction has 0 or 1\nupload_transaction (enforced by the unique index), and the holding and\naccount can be reached through the transaction.",
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "upload_id": {
+                    "description": "UploadID ties this row to the file import it came from.",
+                    "type": "string"
                 }
             }
         },

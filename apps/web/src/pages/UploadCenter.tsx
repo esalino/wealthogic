@@ -1,51 +1,100 @@
 import { useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
+import { getUploads, getUploadTransactions } from '../api/uploads'
 
-type UploadStatus = 'Completed' | 'Failed' | 'Processing'
+const PAGE_SIZES = [10, 20, 50]
 
-interface UploadRow {
-  date: string
-  fileName: string
-  status: UploadStatus
-  size: string
+interface Pagination {
+  pageIndex: number
+  pageSize: number
 }
 
-const uploadHistory: UploadRow[] = [
-  { date: 'Oct 24 2023', fileName: 'Q3_Brokerage_Export.csv', status: 'Completed', size: '1.2 MB' },
-  { date: 'Oct 21 2023', fileName: 'Manual_Additions_V2.xlsx', status: 'Completed', size: '840 KB' },
-  { date: 'Oct 15 2023', fileName: 'Legacy_Portfolio_2019.csv', status: 'Failed', size: '4.1 MB' },
-  { date: 'Oct 02 2023', fileName: 'Chase_Sept_Statement.pdf', status: 'Processing', size: '2.3 MB' },
-  { date: 'Sep 28 2023', fileName: 'Wealthfront_Dividend_Log.csv', status: 'Completed', size: '45 KB' },
-]
+// Date-only columns are stored at UTC midnight; format in UTC so they don't slip
+// a day in western timezones.
+const fmtDate = (iso: string) =>
+  new Date(iso).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: '2-digit', timeZone: 'UTC' })
 
-function statusChip(status: UploadStatus) {
-  const base = 'inline-flex items-center px-2 py-0.5 rounded-full text-label-sm font-semibold'
-  switch (status) {
-    case 'Completed':
-      return <span className={`${base} bg-secondary-container text-on-secondary-container`}>{status}</span>
-    case 'Failed':
-      return <span className={`${base} bg-error-container text-on-error-container`}>{status}</span>
-    case 'Processing':
-      return <span className={`${base} bg-surface-container-high text-on-surface-variant`}>{status}</span>
-  }
+function fmtRange(start: string | null, end: string | null) {
+  if (!start && !end) return '—'
+  if (start && end) return `${fmtDate(start)} – ${fmtDate(end)}`
+  return fmtDate((start ?? end)!)
+}
+
+const fmtCurrency = (n: number) => (n ?? 0).toLocaleString('en-US', { style: 'currency', currency: 'USD' })
+const fmtNumber = (n: number) => (n ?? 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+const fmtSignedCurrency = (n: number) => `${(n ?? 0) < 0 ? '-' : '+'}${fmtCurrency(Math.abs(n ?? 0))}`
+
+function amountColor(n: number) {
+  if (n < 0) return 'text-error'
+  if (n > 0) return 'text-secondary'
+  return 'text-on-surface'
+}
+
+function TablePagination({ page, setPage, total }: { page: Pagination; setPage: (p: Pagination) => void; total: number }) {
+  const pageCount = Math.max(1, Math.ceil(total / page.pageSize))
+  const canPrev = page.pageIndex > 0
+  const canNext = page.pageIndex < pageCount - 1
+
+  return (
+    <div className="flex items-center justify-between px-6 py-4 border-t border-outline-variant">
+      <div className="flex items-center gap-2">
+        <span className="text-label-sm text-on-surface-variant">Rows per page</span>
+        <select
+          value={page.pageSize}
+          onChange={(e) => setPage({ pageIndex: 0, pageSize: Number(e.target.value) })}
+          className="px-2 py-1 bg-surface-container-low border border-outline-variant rounded-lg text-label-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-secondary/30 focus:border-secondary transition-colors"
+        >
+          {PAGE_SIZES.map((size) => <option key={size} value={size}>{size}</option>)}
+        </select>
+      </div>
+      <div className="flex items-center gap-3">
+        <p className="text-label-sm text-on-surface-variant">
+          Page {page.pageIndex + 1} of {pageCount}
+        </p>
+        <div className="flex items-center gap-1">
+          <button
+            onClick={() => setPage({ ...page, pageIndex: page.pageIndex - 1 })}
+            disabled={!canPrev}
+            className="w-8 h-8 flex items-center justify-center rounded-lg text-on-surface-variant hover:bg-surface-container-high transition-colors disabled:opacity-40"
+          >
+            <span className="material-symbols-outlined text-xl">chevron_left</span>
+          </button>
+          <button
+            onClick={() => setPage({ ...page, pageIndex: page.pageIndex + 1 })}
+            disabled={!canNext}
+            className="w-8 h-8 flex items-center justify-center rounded-lg text-on-surface-variant hover:bg-surface-container-high transition-colors disabled:opacity-40"
+          >
+            <span className="material-symbols-outlined text-xl">chevron_right</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function StateRow({ colSpan, children }: { colSpan: number; children: React.ReactNode }) {
+  return (
+    <tr>
+      <td colSpan={colSpan} className="px-6 py-10 text-center text-body-md text-on-surface-variant">{children}</td>
+    </tr>
+  )
 }
 
 export default function UploadCenter() {
-  const [isDragging, setIsDragging] = useState(false)
+  const [historyPage, setHistoryPage] = useState<Pagination>({ pageIndex: 0, pageSize: 10 })
+  const [txnPage, setTxnPage] = useState<Pagination>({ pageIndex: 0, pageSize: 10 })
 
-  function handleDragOver(e: React.DragEvent<HTMLDivElement>) {
-    e.preventDefault()
-    setIsDragging(true)
-  }
+  const uploadsQuery = useQuery({
+    queryKey: ['uploads', historyPage.pageIndex, historyPage.pageSize],
+    queryFn: () => getUploads(historyPage.pageIndex + 1, historyPage.pageSize),
+  })
+  const txnsQuery = useQuery({
+    queryKey: ['upload-transactions', txnPage.pageIndex, txnPage.pageSize],
+    queryFn: () => getUploadTransactions(txnPage.pageIndex + 1, txnPage.pageSize),
+  })
 
-  function handleDragLeave() {
-    setIsDragging(false)
-  }
-
-  function handleDrop(e: React.DragEvent<HTMLDivElement>) {
-    e.preventDefault()
-    setIsDragging(false)
-    // handle dropped files here
-  }
+  const uploads = uploadsQuery.data?.data ?? []
+  const txns = txnsQuery.data?.data ?? []
 
   return (
     <div className="p-8">
@@ -53,123 +102,84 @@ export default function UploadCenter() {
       <div className="mb-8">
         <h1 className="text-headline-lg text-on-surface mb-2">Upload Center</h1>
         <p className="text-body-lg text-on-surface-variant max-w-2xl">
-          Import your financial data from CSV exports, Excel files, or PDF statements. Our AI will automatically parse and categorize your transactions.
+          Review your imported files and the transactions they contained.
         </p>
       </div>
 
-      {/* Drag & Drop zone */}
-      <div
-        onDragOver={handleDragOver}
-        onDragLeave={handleDragLeave}
-        onDrop={handleDrop}
-        className={`upload-dashed-border p-12 flex flex-col items-center justify-center mb-8 transition-colors ${
-          isDragging ? 'bg-secondary-container/20' : 'bg-surface-container-lowest'
-        }`}
-      >
-        <div className="w-16 h-16 rounded-xl bg-primary-fixed flex items-center justify-center mb-4">
-          <span className="material-symbols-outlined text-primary text-4xl">upload_file</span>
-        </div>
-        <h2 className="text-headline-sm text-on-surface mb-2">Drag &amp; Drop CSV</h2>
-        <p className="text-body-md text-on-surface-variant mb-6">
-          or select files from your computer. Supports CSV, XLSX, and PDF formats.
-        </p>
-        <div className="flex gap-3">
-          <label className="flex items-center gap-2 px-5 py-2.5 bg-primary text-on-primary rounded-lg text-body-md font-semibold cursor-pointer hover:opacity-90 transition-opacity">
-            <span className="material-symbols-outlined text-xl">folder_open</span>
-            Select Files
-            <input type="file" className="hidden" multiple accept=".csv,.xlsx,.pdf" />
-          </label>
-          <button className="flex items-center gap-2 px-5 py-2.5 border border-outline-variant rounded-lg text-body-md text-on-surface hover:bg-surface-container-high transition-colors">
-            <span className="material-symbols-outlined text-xl">description</span>
-            View Templates
-          </button>
-        </div>
-      </div>
-
-      {/* Bento grid */}
-      <div className="grid grid-cols-12 gap-6">
-        {/* Guidelines column */}
-        <div className="col-span-12 lg:col-span-4 space-y-4">
-          {/* Supported Providers */}
-          <div className="bg-surface-container-lowest rounded-xl shadow-card p-6">
-            <h3 className="text-headline-sm text-on-surface mb-1">Supported Providers</h3>
-            <p className="text-body-md text-on-surface-variant mb-4">Import directly from these institutions.</p>
-            <div className="flex gap-3">
-              {[
-                { icon: 'account_balance', label: 'Banks' },
-                { icon: 'finance', label: 'Brokers' },
-                { icon: 'currency_bitcoin', label: 'Crypto' },
-              ].map((p) => (
-                <div key={p.label} className="flex-1 flex flex-col items-center gap-2 p-3 bg-surface-container-low rounded-lg">
-                  <span className="material-symbols-outlined text-on-surface-variant text-2xl">{p.icon}</span>
-                  <span className="text-label-sm text-on-surface-variant">{p.label}</span>
-                </div>
-              ))}
-            </div>
-            <div className="mt-4 space-y-2">
-              {['Chase', 'Fidelity', 'Vanguard', 'Coinbase', 'Schwab'].map((name) => (
-                <div key={name} className="flex items-center gap-2 text-body-md text-on-surface-variant">
-                  <span className="material-symbols-outlined text-secondary text-base">check_circle</span>
-                  {name}
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Auto-Sync card */}
-          <div className="bg-primary-container rounded-xl shadow-card p-6">
-            <div className="w-10 h-10 rounded-lg bg-white/10 flex items-center justify-center mb-4">
-              <span className="material-symbols-outlined text-on-primary text-xl">sync</span>
-            </div>
-            <h3 className="text-headline-sm text-on-primary mb-2">Auto-Sync</h3>
-            <p className="text-body-md text-on-primary-container/80 mb-4">
-              Connect your accounts via API for real-time automatic syncing. No more manual uploads.
-            </p>
-            <button className="flex items-center gap-2 px-4 py-2 bg-secondary text-on-secondary rounded-lg text-body-md font-semibold hover:opacity-90 transition-opacity">
-              <span className="material-symbols-outlined text-xl">settings_ethernet</span>
-              Configure API
-            </button>
-          </div>
-        </div>
-
+      <div className="space-y-6">
         {/* Upload History table */}
-        <div className="col-span-12 lg:col-span-8 bg-surface-container-lowest rounded-xl shadow-card">
-          <div className="flex items-center justify-between px-6 py-4 border-b border-outline-variant">
+        <div className="bg-surface-container-lowest rounded-xl shadow-card">
+          <div className="px-6 py-4 border-b border-outline-variant">
             <h2 className="text-headline-sm text-on-surface">Upload History</h2>
-            <button className="text-body-md text-secondary font-semibold hover:opacity-80 transition-opacity">Clear History</button>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead>
+                <tr className="border-b border-outline-variant">
+                  <th className="text-left px-6 py-3 text-label-caps text-on-surface-variant uppercase">Uploaded</th>
+                  <th className="text-left px-6 py-3 text-label-caps text-on-surface-variant uppercase">File Name</th>
+                  <th className="text-right px-6 py-3 text-label-caps text-on-surface-variant uppercase">Date Range</th>
+                </tr>
+              </thead>
+              <tbody>
+                {uploadsQuery.isLoading && <StateRow colSpan={3}>Loading uploads…</StateRow>}
+                {uploadsQuery.isError && <StateRow colSpan={3}><span className="text-error">Failed to load uploads.</span></StateRow>}
+                {!uploadsQuery.isLoading && !uploadsQuery.isError && uploads.length === 0 && <StateRow colSpan={3}>No uploads yet.</StateRow>}
+                {uploads.map((row) => (
+                  <tr key={row.id} className="border-b border-outline-variant last:border-0 hover:bg-surface-container-low transition-colors">
+                    <td className="px-6 py-4 text-body-md text-on-surface-variant tabular-nums whitespace-nowrap">{fmtDate(row.created_at)}</td>
+                    <td className="px-6 py-4">
+                      <div className="flex items-center gap-2">
+                        <span className="material-symbols-outlined text-on-surface-variant text-base">description</span>
+                        <span className="text-body-md text-on-surface">{row.file_name}</span>
+                      </div>
+                    </td>
+                    <td className="px-6 py-4 text-right text-body-md text-on-surface-variant tabular-nums whitespace-nowrap">{fmtRange(row.start_date, row.end_date)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <TablePagination page={historyPage} setPage={setHistoryPage} total={uploadsQuery.data?.total ?? 0} />
+        </div>
+
+        {/* Upload Transactions table */}
+        <div className="bg-surface-container-lowest rounded-xl shadow-card">
+          <div className="flex items-center justify-between px-6 py-4 border-b border-outline-variant">
+            <h2 className="text-headline-sm text-on-surface">Upload Transactions</h2>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full">
               <thead>
                 <tr className="border-b border-outline-variant">
                   <th className="text-left px-6 py-3 text-label-caps text-on-surface-variant uppercase">Date</th>
-                  <th className="text-left px-6 py-3 text-label-caps text-on-surface-variant uppercase">File Name</th>
-                  <th className="text-left px-6 py-3 text-label-caps text-on-surface-variant uppercase">Status</th>
-                  <th className="text-right px-6 py-3 text-label-caps text-on-surface-variant uppercase">Size</th>
+                  <th className="text-left px-6 py-3 text-label-caps text-on-surface-variant uppercase">Symbol</th>
+                  <th className="text-left px-6 py-3 text-label-caps text-on-surface-variant uppercase">Action</th>
+                  <th className="text-right px-6 py-3 text-label-caps text-on-surface-variant uppercase">Quantity</th>
+                  <th className="text-right px-6 py-3 text-label-caps text-on-surface-variant uppercase">Price</th>
+                  <th className="text-right px-6 py-3 text-label-caps text-on-surface-variant uppercase">Amount</th>
                 </tr>
               </thead>
               <tbody>
-                {uploadHistory.map((row, i) => (
-                  <tr key={i} className="border-b border-outline-variant last:border-0 hover:bg-surface-container-low transition-colors">
-                    <td className="px-6 py-4 text-body-md text-on-surface-variant tabular-nums whitespace-nowrap">{row.date}</td>
+                {txnsQuery.isLoading && <StateRow colSpan={6}>Loading transactions…</StateRow>}
+                {txnsQuery.isError && <StateRow colSpan={6}><span className="text-error">Failed to load transactions.</span></StateRow>}
+                {!txnsQuery.isLoading && !txnsQuery.isError && txns.length === 0 && <StateRow colSpan={6}>No upload transactions yet.</StateRow>}
+                {txns.map((row) => (
+                  <tr key={row.id} className="border-b border-outline-variant last:border-0 hover:bg-surface-container-low transition-colors">
+                    <td className="px-6 py-4 text-body-md text-on-surface-variant tabular-nums whitespace-nowrap">{fmtDate(row.date)}</td>
+                    <td className="px-6 py-4 text-body-md font-medium text-on-surface">{row.symbol || '—'}</td>
                     <td className="px-6 py-4">
-                      <div className="flex items-center gap-2">
-                        <span className="material-symbols-outlined text-on-surface-variant text-base">description</span>
-                        <span className="text-body-md text-on-surface">{row.fileName}</span>
-                      </div>
+                      <span className="text-body-md text-on-surface-variant block max-w-[22rem] truncate" title={row.action}>{row.action}</span>
                     </td>
-                    <td className="px-6 py-4">{statusChip(row.status)}</td>
-                    <td className="px-6 py-4 text-right text-body-md text-on-surface-variant tabular-nums">{row.size}</td>
+                    <td className="px-6 py-4 text-right text-data-tabular text-on-surface tabular-nums">{row.quantity != null ? fmtNumber(row.quantity) : '—'}</td>
+                    <td className="px-6 py-4 text-right text-data-tabular text-on-surface tabular-nums">{row.price != null ? fmtCurrency(row.price) : '—'}</td>
+                    <td className={`px-6 py-4 text-right text-data-tabular font-semibold tabular-nums ${amountColor(row.amount)}`}>{fmtSignedCurrency(row.amount)}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
-          <div className="px-6 py-4 border-t border-outline-variant">
-            <button className="w-full py-2 text-body-md text-secondary font-semibold hover:bg-surface-container-low rounded-lg transition-colors">
-              Load Older History
-            </button>
-          </div>
+          <TablePagination page={txnPage} setPage={setTxnPage} total={txnsQuery.data?.total ?? 0} />
         </div>
       </div>
     </div>

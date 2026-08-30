@@ -30,23 +30,49 @@ const (
 
 const fidelityDateLayout = "01/02/2006"
 
-// buyActionPrefix identifies a Fidelity "buy" action, e.g. "YOU BOUGHT ...".
-const buyActionPrefix = "YOU BOUGHT"
+// The app's normalized action vocabulary. Only buys and sells are mapped for
+// now; any other raw action passes through unchanged.
+const (
+	actionBuy  = "Buy"
+	actionSell = "Sell"
+)
 
-// isStockBuy reports whether a transaction represents an outright stock
-// purchase, as opposed to an option trade, ETF, treasury, or other non-stock
-// action that also happens to start with "YOU BOUGHT".
-func isStockBuy(action string, assetType *string) bool {
-	return assetType != nil && *assetType == defaultAssetType && strings.HasPrefix(strings.ToUpper(action), buyActionPrefix)
+// mapAction normalizes a raw Fidelity action (e.g. "YOU BOUGHT ...") into the
+// app's action vocabulary. Anything not mapped yet passes through raw.
+func mapAction(rawAction string) string {
+	upper := strings.ToUpper(rawAction)
+	switch {
+	case strings.HasPrefix(upper, "YOU BOUGHT"):
+		return actionBuy
+	case strings.HasPrefix(upper, "YOU SOLD"):
+		return actionSell
+	default:
+		return rawAction
+	}
 }
 
-// fidelityTransactionsHandler parses a Fidelity account history CSV and
-// creates one Transaction per row, tied to the account passed in Options.
-// Fidelity lists rows newest-first, but we want insertion order (and thus PK
-// order) to match chronological order, so rows are buffered and inserted in
-// reverse.
-// Positions are not touched yet - each upload just appends transactions, so
-// re-uploading the same file will duplicate rows until we add dedup logic.
+// isStockBuy reports whether a mapped transaction is an outright stock purchase
+// (as opposed to an ETF, option, treasury, or other non-stock buy). Only these
+// open a tax lot.
+func isStockBuy(mappedAction string, assetType *string) bool {
+	return mappedAction == actionBuy && assetType != nil && *assetType == defaultAssetType
+}
+
+// parsedRow pairs a parsed Transaction (with its mapped action) with the raw
+// action from the file, which the UploadTransaction preserves.
+type parsedRow struct {
+	txn       models.Transaction
+	rawAction string
+}
+
+// fidelityTransactionsHandler parses a Fidelity account history CSV. For each
+// row it creates a Transaction (with a mapped action) plus, as a record of the
+// import, an UploadTransaction (with the raw action) linked back to it; all of
+// them tie to an Upload row logging the file. A stock buy also opens a tax lot.
+//
+// Fidelity lists rows newest-first, so rows are buffered and inserted in reverse
+// to keep insertion (and thus PK) order chronological.
+// Positions aren't deduped yet - re-uploading the same file duplicates rows.
 type fidelityTransactionsHandler struct{}
 
 func (h *fidelityTransactionsHandler) Process(db *gorm.DB, file io.Reader, opts Options) (*Result, error) {
@@ -60,12 +86,13 @@ func (h *fidelityTransactionsHandler) Process(db *gorm.DB, file io.Reader, opts 
 	}
 
 	reader := csv.NewReader(file)
-	// The export has leading blank lines and a trailing disclaimer/footer
-	// with varying column counts, so don't enforce a fixed number of fields.
+	// The export has leading blank lines and a trailing disclaimer/footer with
+	// varying column counts, so don't enforce a fixed number of fields.
 	reader.FieldsPerRecord = -1
 
 	result := &Result{}
-	var transactions []models.Transaction
+	var rows []parsedRow
+	var minDate, maxDate time.Time
 	for {
 		record, err := reader.Read()
 		if errors.Is(err, io.EOF) {
@@ -81,8 +108,8 @@ func (h *fidelityTransactionsHandler) Process(db *gorm.DB, file io.Reader, opts 
 		}
 
 		runDate := strings.TrimSpace(record[txnColRunDate])
-		action := strings.TrimSpace(record[txnColAction])
-		if runDate == "" || runDate == "Run Date" || action == "" {
+		rawAction := strings.TrimSpace(record[txnColAction])
+		if runDate == "" || runDate == "Run Date" || rawAction == "" {
 			result.Skipped++
 			continue
 		}
@@ -91,6 +118,13 @@ func (h *fidelityTransactionsHandler) Process(db *gorm.DB, file io.Reader, opts 
 		if err != nil {
 			result.Skipped++
 			continue
+		}
+
+		if minDate.IsZero() || date.Before(minDate) {
+			minDate = date
+		}
+		if maxDate.IsZero() || date.After(maxDate) {
+			maxDate = date
 		}
 
 		symbol := strings.TrimSuffix(strings.TrimSpace(record[txnColSymbol]), "**")
@@ -106,28 +140,49 @@ func (h *fidelityTransactionsHandler) Process(db *gorm.DB, file io.Reader, opts 
 			assetDescription = &description
 		}
 
-		transactions = append(transactions, models.Transaction{
-			AccountID:        opts.AccountID,
-			AssetType:        assetType,
-			Symbol:           symbol,
-			AssetDescription: assetDescription,
-			Action:           action,
-			Date:             date,
-			Quantity:         parseDollarPtr(record[txnColQuantity]),
-			Price:            parseDollarPtr(record[txnColPrice]),
-			Amount:           parseDollar(record[txnColAmount]),
-			Commission:       parseDollar(record[txnColCommission]),
-			Fees:             parseDollar(record[txnColFees]),
-			SettlementDate:   parseDatePtr(record[txnColSettlementDate]),
+		rows = append(rows, parsedRow{
+			rawAction: rawAction,
+			txn: models.Transaction{
+				AccountID:        opts.AccountID,
+				AssetType:        assetType,
+				Symbol:           symbol,
+				AssetDescription: assetDescription,
+				Action:           mapAction(rawAction),
+				Date:             date,
+				Quantity:         parseDollarPtr(record[txnColQuantity]),
+				Price:            parseDollarPtr(record[txnColPrice]),
+				Amount:           parseDollar(record[txnColAmount]),
+				Commission:       parseDollar(record[txnColCommission]),
+				Fees:             parseDollar(record[txnColFees]),
+				SettlementDate:   parseDatePtr(record[txnColSettlementDate]),
+			},
 		})
 	}
 
-	// Fidelity lists newest first; insert oldest first so the auto-increment
-	// PK order matches chronological order. The whole batch is wrapped in a
-	// transaction so a bad row doesn't leave a partially imported file.
+	// Date range covered by the file (nil if nothing parsed).
+	var startDate, endDate *time.Time
+	if !minDate.IsZero() {
+		startDate = &minDate
+		endDate = &maxDate
+	}
+
+	// The whole batch is wrapped in a transaction so a bad row doesn't leave a
+	// partially imported file.
 	err := db.Transaction(func(tx *gorm.DB) error {
-		for i := len(transactions) - 1; i >= 0; i-- {
-			txn := &transactions[i]
+		// Log the import itself; every row's UploadTransaction links to it.
+		upload := models.Upload{
+			FileName:  opts.FileName,
+			AccountID: opts.AccountID,
+			StartDate: startDate,
+			EndDate:   endDate,
+		}
+		if err := tx.Create(&upload).Error; err != nil {
+			return fmt.Errorf("failed to create upload: %w", err)
+		}
+
+		// Insert oldest first so the PK (UUIDv7) order is chronological.
+		for i := len(rows) - 1; i >= 0; i-- {
+			txn := &rows[i].txn
 
 			// A stock buy opens a new tax lot at the transaction's price and
 			// quantity, and both the transaction and the lot link to the
@@ -179,6 +234,28 @@ func (h *fidelityTransactionsHandler) Process(db *gorm.DB, file io.Reader, opts 
 				if err := tx.Create(&lot).Error; err != nil {
 					return fmt.Errorf("failed to create tax lot for %s on %s: %w", txn.Symbol, txn.Date.Format(fidelityDateLayout), err)
 				}
+			}
+
+			// Record the raw import row, keyed to the upload and the
+			// transaction it produced.
+			uploadTxn := models.UploadTransaction{
+				AssetType:        txn.AssetType,
+				Symbol:           txn.Symbol,
+				AssetDescription: txn.AssetDescription,
+				Action:           rows[i].rawAction,
+				Date:             txn.Date,
+				Quantity:         txn.Quantity,
+				Price:            txn.Price,
+				Amount:           txn.Amount,
+				Commission:       txn.Commission,
+				Fees:             txn.Fees,
+				SettlementDate:   txn.SettlementDate,
+				RealizedGains:    txn.RealizedGains,
+				TransactionID:    txn.ID,
+				UploadID:         upload.ID,
+			}
+			if err := tx.Create(&uploadTxn).Error; err != nil {
+				return fmt.Errorf("failed to create upload transaction for %s on %s: %w", txn.Symbol, txn.Date.Format(fidelityDateLayout), err)
 			}
 		}
 		return nil

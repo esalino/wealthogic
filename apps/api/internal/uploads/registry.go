@@ -16,9 +16,11 @@ type Result struct {
 } // @name UploadResult
 
 // Options carries request-level context a handler may need beyond the file
-// itself, e.g. which account transactions should be tied to.
+// itself, e.g. which account transactions should be tied to and the name of the
+// uploaded file.
 type Options struct {
 	AccountID uuid.UUID
+	FileName  string
 }
 
 // FileHandler processes an uploaded file into database records.

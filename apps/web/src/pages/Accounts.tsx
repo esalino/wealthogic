@@ -441,10 +441,13 @@ function UploadAccountModal({ account, onClose }: { account: Account | null; onC
   const { mutate, isPending, error, data: result, reset } = useMutation({
     mutationFn: uploadFile,
     onSuccess: () => {
-      // An import can create holdings, transactions and tax lots.
+      // An import creates an upload + upload transactions, and can create
+      // holdings, transactions and tax lots.
       queryClient.invalidateQueries({ queryKey: ['holdings'] })
       queryClient.invalidateQueries({ queryKey: ['transactions'] })
       queryClient.invalidateQueries({ queryKey: ['tax-lots'] })
+      queryClient.invalidateQueries({ queryKey: ['uploads'] })
+      queryClient.invalidateQueries({ queryKey: ['upload-transactions'] })
     },
   })
 
