@@ -670,7 +670,7 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
-                    "uploads"
+                    "upload-transactions"
                 ],
                 "summary": "List upload transactions with pagination",
                 "parameters": [

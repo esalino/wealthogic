@@ -151,7 +151,7 @@ type paginatedUploadTransactions struct {
 
 // GetUploadTransactions godoc
 // @Summary      List upload transactions with pagination
-// @Tags         uploads
+// @Tags         upload-transactions
 // @Produce      json
 // @Param        page       query     int  false  "Page number (default 1)"
 // @Param        page_size  query     int  false  "Items per page (default 20, max 100)"

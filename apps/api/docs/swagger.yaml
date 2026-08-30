@@ -940,7 +940,7 @@ paths:
             type: object
       summary: List upload transactions with pagination
       tags:
-      - uploads
+      - upload-transactions
   /uploads:
     get:
       parameters:
