@@ -42,6 +42,4 @@ type Holding struct {
 	GainRealizedAmount  float64 `json:"gain_realized_amount"`
 	DividendIncome      float64 `json:"dividend_income"`
 
-	// Tax lots are lazy-loaded via GET /tax-lots?holding_id=, not embedded here.
-	TaxLots []TaxLot `json:"-"`
 } // @name Holding

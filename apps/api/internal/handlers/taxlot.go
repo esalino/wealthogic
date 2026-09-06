@@ -1,8 +1,10 @@
 package handlers
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/eriksalino/wealthogic/api/internal/models"
 	"github.com/eriksalino/wealthogic/api/internal/portfolio"
@@ -10,6 +12,9 @@ import (
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
+
+// A "tax lot" is now just a stock buy transaction. These handlers project buy
+// transactions into the lot shape the UI expects, so the frontend is unchanged.
 
 type TaxLotHandler interface {
 	GetTaxLots(c *gin.Context)
@@ -25,11 +30,58 @@ func NewTaxLotHandler(db *gorm.DB) TaxLotHandler {
 	return &taxLotHandler{db: db}
 }
 
+// taxLotView is a buy transaction presented as a tax lot.
+type taxLotView struct {
+	ID                uuid.UUID  `json:"id"`
+	AssetType         string     `json:"asset_type"`
+	Symbol            string     `json:"symbol"`
+	AssetDescription  string     `json:"asset_description"`
+	PurchaseDate      time.Time  `json:"purchase_date"`
+	PurchaseQuantity  float64    `json:"purchase_quantity"`
+	PurchasePrice     float64    `json:"purchase_price"`
+	RemainingQuantity float64    `json:"remaining_quantity"`
+	HoldingID         *uuid.UUID `json:"holding_id"`
+	AccountID         uuid.UUID  `json:"account_id"`
+	CreatedAt         time.Time  `json:"created_at"`
+	UpdatedAt         time.Time  `json:"updated_at"`
+} // @name TaxLot
+
+func derefString(p *string) string {
+	if p != nil {
+		return *p
+	}
+	return ""
+}
+
+func derefFloat(p *float64) float64 {
+	if p != nil {
+		return *p
+	}
+	return 0
+}
+
+func lotView(t models.Transaction) taxLotView {
+	return taxLotView{
+		ID:                t.ID,
+		AssetType:         derefString(t.AssetType),
+		Symbol:            t.Symbol,
+		AssetDescription:  derefString(t.AssetDescription),
+		PurchaseDate:      t.Date,
+		PurchaseQuantity:  derefFloat(t.Quantity),
+		PurchasePrice:     derefFloat(t.Price),
+		RemainingQuantity: derefFloat(t.RemainingQuantity),
+		HoldingID:         t.HoldingID,
+		AccountID:         t.AccountID,
+		CreatedAt:         t.CreatedAt,
+		UpdatedAt:         t.UpdatedAt,
+	}
+}
+
 type paginatedTaxLots struct {
-	Data     []models.TaxLot `json:"data"`
-	Total    int64           `json:"total"`
-	Page     int             `json:"page"`
-	PageSize int             `json:"page_size"`
+	Data     []taxLotView `json:"data"`
+	Total    int64        `json:"total"`
+	Page     int          `json:"page"`
+	PageSize int          `json:"page_size"`
 } // @name PaginatedTaxLots
 
 // GetTaxLots godoc
@@ -54,38 +106,44 @@ func (h *taxLotHandler) GetTaxLots(c *gin.Context) {
 		pageSize = 20
 	}
 
-	// Optional holding_id filter, applied to both the count and the page query.
-	applyFilter := func(q *gorm.DB) *gorm.DB { return q }
+	var holdingID *uuid.UUID
 	if hid := c.Query("holding_id"); hid != "" {
-		holdingID, err := uuid.Parse(hid)
+		id, err := uuid.Parse(hid)
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid holding_id"})
 			return
 		}
-		applyFilter = func(q *gorm.DB) *gorm.DB { return q.Where("holding_id = ?", holdingID) }
+		holdingID = &id
+	}
+
+	// Lot-forming stock buys carry a non-null remaining_quantity.
+	filter := func(q *gorm.DB) *gorm.DB {
+		q = q.Where("LOWER(action) = ? AND remaining_quantity IS NOT NULL", "buy")
+		if holdingID != nil {
+			q = q.Where("holding_id = ?", *holdingID)
+		}
+		return q
 	}
 
 	var total int64
-	if err := applyFilter(h.db.Model(&models.TaxLot{})).Count(&total).Error; err != nil {
+	if err := filter(h.db.Model(&models.Transaction{})).Count(&total).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch tax lots"})
 		return
 	}
 
-	var lots []models.TaxLot
+	var buys []models.Transaction
 	offset := (page - 1) * pageSize
-	// Newest first. UUIDv7 ids are time-ordered, so id breaks date ties in
-	// insertion order.
-	if err := applyFilter(h.db.Model(&models.TaxLot{})).Order("purchase_date DESC").Order("id DESC").Offset(offset).Limit(pageSize).Find(&lots).Error; err != nil {
+	if err := filter(h.db).Order("date DESC").Order("id DESC").Offset(offset).Limit(pageSize).Find(&buys).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch tax lots"})
 		return
 	}
 
-	c.JSON(http.StatusOK, paginatedTaxLots{
-		Data:     lots,
-		Total:    total,
-		Page:     page,
-		PageSize: pageSize,
-	})
+	views := make([]taxLotView, len(buys))
+	for i := range buys {
+		views[i] = lotView(buys[i])
+	}
+
+	c.JSON(http.StatusOK, paginatedTaxLots{Data: views, Total: total, Page: page, PageSize: pageSize})
 }
 
 type createTaxLotRequest struct {
@@ -98,16 +156,16 @@ type createTaxLotRequest struct {
 	Fees             float64   `json:"fees"`
 } // @name CreateTaxLotRequest
 
-// taxLotWithTransaction is returned when a lot is added manually: the lot and
-// the buy transaction that was recorded alongside it.
+// taxLotWithTransaction is returned when a lot is added: the lot view and the
+// underlying buy transaction (they are the same row).
 type taxLotWithTransaction struct {
-	TaxLot      models.TaxLot      `json:"tax_lot"`
+	TaxLot      taxLotView         `json:"tax_lot"`
 	Transaction models.Transaction `json:"transaction"`
 } // @name TaxLotWithTransaction
 
 // CreateTaxLot godoc
 // @Summary      Add a tax lot
-// @Description  Records a purchase lot against a holding and, in the same transaction, the buy transaction that produced it.
+// @Description  Records a stock buy against a holding. The buy transaction is the tax lot.
 // @Tags         tax-lots
 // @Accept       json
 // @Produce      json
@@ -149,50 +207,30 @@ func (h *taxLotHandler) CreateTaxLot(c *gin.Context) {
 		return
 	}
 
-	// The lot and its buy transaction share the holding's identity. A buy is a
-	// cash outflow, so the transaction amount is negative and includes fees.
 	assetType := holding.AssetType
 	description := holding.Description
 	qty := req.PurchaseQuantity
 	price := req.PurchasePrice
 	amount := -(qty*price + req.Commission + req.Fees)
 
-	lot := models.TaxLot{
-		AssetType:         assetType,
-		Symbol:            holding.Symbol,
-		AssetDescription:  description,
-		PurchaseDate:      purchaseDate,
-		PurchaseQuantity:  qty,
-		PurchasePrice:     price,
-		RemainingQuantity: qty,
-		HoldingID:         &holding.ID,
-		AccountID:         req.AccountID,
-	}
-
 	txn := models.Transaction{
-		AccountID:        req.AccountID,
-		HoldingID:        &holding.ID,
-		AssetType:        &assetType,
-		Symbol:           holding.Symbol,
-		AssetDescription: &description,
-		Action:           "Buy",
-		Date:             purchaseDate,
-		Quantity:         &qty,
-		Price:            &price,
-		Amount:           amount,
-		Commission:       req.Commission,
-		Fees:             req.Fees,
+		AccountID:         req.AccountID,
+		HoldingID:         &holding.ID,
+		AssetType:         &assetType,
+		Symbol:            holding.Symbol,
+		AssetDescription:  &description,
+		Action:            "Buy",
+		Date:              purchaseDate,
+		Quantity:          &qty,
+		Price:             &price,
+		Amount:            amount,
+		Commission:        req.Commission,
+		Fees:              req.Fees,
+		RemainingQuantity: &qty,
 	}
 
 	err = h.db.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Create(&lot).Error; err != nil {
-			return err
-		}
 		if err := tx.Create(&txn).Error; err != nil {
-			return err
-		}
-		// Tie the buy transaction to the lot it opened.
-		if err := tx.Create(&models.TaxLotTransaction{TaxLotID: lot.ID, TransactionID: txn.ID, Quantity: qty}).Error; err != nil {
 			return err
 		}
 		return portfolio.RecalcHolding(tx, &holding)
@@ -202,9 +240,8 @@ func (h *taxLotHandler) CreateTaxLot(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusCreated, taxLotWithTransaction{TaxLot: lot, Transaction: txn})
+	c.JSON(http.StatusCreated, taxLotWithTransaction{TaxLot: lotView(txn), Transaction: txn})
 }
-
 
 type updateTaxLotRequest struct {
 	AccountID        uuid.UUID `json:"account_id"`
@@ -215,13 +252,13 @@ type updateTaxLotRequest struct {
 
 // UpdateTaxLot godoc
 // @Summary      Update a tax lot
-// @Description  Updates the lot and recomputes the holding's position from its open lots. The originally recorded buy transaction is left as-is.
+// @Description  Updates the buy transaction behind the lot and recomputes the holding. Rejected if the lot has already been sold from.
 // @Tags         tax-lots
 // @Accept       json
 // @Produce      json
-// @Param        id       path      string               true  "Tax lot ID"
+// @Param        id       path      string               true  "Tax lot (buy transaction) ID"
 // @Param        tax_lot  body      updateTaxLotRequest  true  "Tax lot payload"
-// @Success      200      {object}  models.TaxLot
+// @Success      200      {object}  taxLotView
 // @Failure      400      {object}  map[string]string
 // @Failure      404      {object}  map[string]string
 // @Failure      500      {object}  map[string]string
@@ -249,9 +286,19 @@ func (h *taxLotHandler) UpdateTaxLot(c *gin.Context) {
 		return
 	}
 
-	var lot models.TaxLot
-	if err := h.db.First(&lot, "id = ?", id).Error; err != nil {
+	var txn models.Transaction
+	if err := h.db.Where("id = ? AND LOWER(action) = ?", id, "buy").First(&txn).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "tax lot not found"})
+		return
+	}
+
+	disposed, err := buyHasDisposals(h.db, txn.ID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update tax lot"})
+		return
+	}
+	if disposed {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "cannot edit a lot that has already been sold from"})
 		return
 	}
 
@@ -261,31 +308,32 @@ func (h *taxLotHandler) UpdateTaxLot(c *gin.Context) {
 		return
 	}
 
-	lot.AccountID = req.AccountID
-	lot.PurchaseDate = purchaseDate
-	lot.PurchaseQuantity = req.PurchaseQuantity
-	lot.PurchasePrice = req.PurchasePrice
-	// No partial-sell concept yet, so a lot's remaining quantity tracks its
-	// purchase quantity.
-	lot.RemainingQuantity = req.PurchaseQuantity
+	qty := req.PurchaseQuantity
+	price := req.PurchasePrice
+	txn.AccountID = req.AccountID
+	txn.Date = purchaseDate
+	txn.Quantity = &qty
+	txn.Price = &price
+	txn.RemainingQuantity = &qty
+	txn.Amount = -(qty*price + txn.Commission + txn.Fees)
 
 	err = h.db.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Save(&lot).Error; err != nil {
+		if err := tx.Save(&txn).Error; err != nil {
 			return err
 		}
-		if lot.HoldingID == nil {
-			return nil
+		if txn.HoldingID != nil {
+			return rebuildHolding(tx, *txn.HoldingID, true)
 		}
-		var holding models.Holding
-		if err := tx.First(&holding, "id = ?", *lot.HoldingID).Error; err != nil {
-			return err
-		}
-		return portfolio.RecalcHolding(tx, &holding)
+		return nil
 	})
+	if errors.Is(err, errInsufficientShares) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "not enough shares to cover existing sells"})
+		return
+	}
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update tax lot"})
 		return
 	}
 
-	c.JSON(http.StatusOK, lot)
+	c.JSON(http.StatusOK, lotView(txn))
 }

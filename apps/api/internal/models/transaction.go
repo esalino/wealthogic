@@ -31,6 +31,12 @@ type Transaction struct {
 
 	RealizedGains float64 `json:"realized_gains"`
 
+	// RemainingQuantity is set only on a stock buy, which doubles as a tax lot:
+	// it's the shares of this purchase still open (quantity minus what later
+	// sells have disposed). Nil for sells and other actions. Maintained as a
+	// cache by the recompute; the Gain ledger is the source of truth.
+	RemainingQuantity *float64 `json:"remaining_quantity"`
+
 	// HoldingID is nil until a matching Holding exists to link to - imported
 	// transactions and holdings come from separate Fidelity exports and may
 	// not arrive in the same order.

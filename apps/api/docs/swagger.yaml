@@ -264,10 +264,6 @@ definitions:
       created_at:
         type: string
       holding_id:
-        description: |-
-          HoldingID is nil until a matching Holding exists to link to - imported
-          transactions and holdings come from separate Fidelity exports and may
-          not arrive in the same order.
         type: string
       id:
         type: string
@@ -324,6 +320,13 @@ definitions:
       quantity:
         type: number
       realized_gains:
+        type: number
+      remaining_quantity:
+        description: |-
+          RemainingQuantity is set only on a stock buy, which doubles as a tax lot:
+          it's the shares of this purchase still open (quantity minus what later
+          sells have disposed). Nil for sells and other actions. Maintained as a
+          cache by the recompute; the Gain ledger is the source of truth.
         type: number
       settlement_date:
         type: string
@@ -685,8 +688,8 @@ paths:
     post:
       consumes:
       - application/json
-      description: Records a purchase lot against a holding and, in the same transaction,
-        the buy transaction that produced it.
+      description: Records a stock buy against a holding. The buy transaction is the
+        tax lot.
       parameters:
       - description: Tax lot payload
         in: body
@@ -720,10 +723,10 @@ paths:
     patch:
       consumes:
       - application/json
-      description: Updates the lot and recomputes the holding's position from its
-        open lots. The originally recorded buy transaction is left as-is.
+      description: Updates the buy transaction behind the lot and recomputes the holding.
+        Rejected if the lot has already been sold from.
       parameters:
-      - description: Tax lot ID
+      - description: Tax lot (buy transaction) ID
         in: path
         name: id
         required: true

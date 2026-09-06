@@ -10,73 +10,130 @@ import (
 	"gorm.io/gorm"
 )
 
-// LotAllocation records that a sell drew `Quantity` shares from a specific tax
-// lot. Callers turn these into TaxLotTransaction rows so a disposal can be
-// resolved lot-by-lot for taxes.
-type LotAllocation struct {
-	TaxLotID uuid.UUID
-	Quantity float64
+// lotBasisPerShare is a buy's cost basis per share, including its commission and
+// fees spread across the shares (as tax rules require).
+func lotBasisPerShare(buy models.Transaction) float64 {
+	qty := 0.0
+	if buy.Quantity != nil {
+		qty = *buy.Quantity
+	}
+	price := 0.0
+	if buy.Price != nil {
+		price = *buy.Price
+	}
+	if qty == 0 {
+		return price
+	}
+	return price + (buy.Commission+buy.Fees)/qty
 }
 
-// DepleteLots consumes `quantity` shares from a holding's open lots in the given
-// account, in the account's cost-basis order (FIFO oldest-first by default,
-// LIFO newest-first), reducing each lot's remaining quantity and saving it. It
-// returns the realized gain against sellPrice, the quantity it could NOT fill
-// (0 when there were enough shares), and the per-lot allocations it made.
-// Callers that must reject an over-sell check the unfilled amount; lenient
-// callers (imports) ignore it.
-func DepleteLots(tx *gorm.DB, holdingID, accountID uuid.UUID, quantity, sellPrice float64, costBasisMethod string) (realized, unfilled float64, allocations []LotAllocation, err error) {
-	// Sells may be recorded with a negative quantity (Fidelity's convention),
-	// so work with the magnitude.
-	if quantity < 0 {
-		quantity = -quantity
-	}
-
-	dateOrder, idOrder := "purchase_date ASC", "id ASC"
+// openLots returns a holding's open stock-buy transactions (remaining_quantity >
+// 0) for one account, in the account's cost-basis order (FIFO oldest-first,
+// LIFO newest-first). A stock buy doubles as a tax lot.
+func openLots(tx *gorm.DB, holdingID, accountID uuid.UUID, costBasisMethod string) ([]models.Transaction, error) {
+	dateOrder, idOrder := "date ASC", "id ASC"
 	if strings.EqualFold(costBasisMethod, "LIFO") {
-		dateOrder, idOrder = "purchase_date DESC", "id DESC"
+		dateOrder, idOrder = "date DESC", "id DESC"
+	}
+	var buys []models.Transaction
+	err := tx.Where("holding_id = ? AND account_id = ? AND LOWER(action) = ? AND remaining_quantity > 0", holdingID, accountID, "buy").
+		Order(dateOrder).Order(idOrder).Find(&buys).Error
+	return buys, err
+}
+
+// DepleteLots consumes the sell's shares from the holding's open buy lots in the
+// account's cost-basis order, decrementing each lot's remaining_quantity and
+// writing a Gain (capital-gain) row per lot it draws from. It returns the total
+// realized gain and the quantity it could NOT fill (0 when there were enough
+// shares). Callers that must reject an over-sell check the unfilled amount;
+// lenient callers (imports) ignore it.
+func DepleteLots(tx *gorm.DB, sell *models.Transaction, costBasisMethod string) (realized, unfilled float64, err error) {
+	if sell.HoldingID == nil || sell.Quantity == nil || sell.Price == nil {
+		return 0, 0, nil
 	}
 
-	var lots []models.TaxLot
-	if err := tx.Where("holding_id = ? AND account_id = ? AND remaining_quantity > 0", holdingID, accountID).
-		Order(dateOrder).Order(idOrder).Find(&lots).Error; err != nil {
-		return 0, 0, nil, err
+	// Sells may be recorded with a negative quantity (Fidelity's convention).
+	sellQty := *sell.Quantity
+	if sellQty < 0 {
+		sellQty = -sellQty
+	}
+	sellPrice := *sell.Price
+	sellFees := sell.Commission + sell.Fees
+
+	buys, err := openLots(tx, *sell.HoldingID, sell.AccountID, costBasisMethod)
+	if err != nil {
+		return 0, 0, err
 	}
 
-	remaining := quantity
-	for i := range lots {
+	remaining := sellQty
+	for i := range buys {
 		if remaining <= 0 {
 			break
 		}
-		take := lots[i].RemainingQuantity
+		buy := &buys[i]
+		take := *buy.RemainingQuantity
 		if take > remaining {
 			take = remaining
 		}
-		realized += (sellPrice - lots[i].PurchasePrice) * take
-		lots[i].RemainingQuantity -= take
-		remaining -= take
-		allocations = append(allocations, LotAllocation{TaxLotID: lots[i].ID, Quantity: take})
-		if err := tx.Save(&lots[i]).Error; err != nil {
-			return 0, 0, nil, err
+
+		costBasis := take * lotBasisPerShare(*buy)
+		// Proceeds are net of the sell's fees, allocated pro-rata to the shares.
+		var feeShare float64
+		if sellQty > 0 {
+			feeShare = (take / sellQty) * sellFees
 		}
+		proceeds := take*sellPrice - feeShare
+		gain := proceeds - costBasis
+
+		term := "short"
+		if !sell.Date.Before(buy.Date.AddDate(1, 0, 1)) {
+			term = "long" // held more than one year
+		}
+
+		g := models.Gain{
+			Category:         "capital_gain",
+			HoldingID:        sell.HoldingID,
+			AccountID:        sell.AccountID,
+			Symbol:           sell.Symbol,
+			TransactionID:    sell.ID,
+			LotTransactionID: &buy.ID,
+			AcquiredDate:     buy.Date,
+			RealizedDate:     sell.Date,
+			Quantity:         take,
+			CostBasis:        costBasis,
+			Proceeds:         proceeds,
+			Term:             term,
+			Amount:           gain,
+		}
+		if err := tx.Create(&g).Error; err != nil {
+			return 0, 0, err
+		}
+
+		newRemaining := *buy.RemainingQuantity - take
+		if err := tx.Model(buy).Update("remaining_quantity", newRemaining).Error; err != nil {
+			return 0, 0, err
+		}
+
+		realized += gain
+		remaining -= take
 	}
-	return realized, remaining, allocations, nil
+	return realized, remaining, nil
 }
 
 // RecalcHolding recomputes a holding's aggregates and saves them: position
-// (quantity, cost basis, current value, unrealized gain) from its open tax lots,
-// and realized gain from the sells recorded against it. Dividend income isn't
-// derived here, so it's left untouched.
+// (quantity, cost basis, current value, unrealized gain) from its open buy lots,
+// and realized gain from the Gain ledger. Dividend income isn't derived here yet.
 func RecalcHolding(tx *gorm.DB, holding *models.Holding) error {
-	var lots []models.TaxLot
-	if err := tx.Where("holding_id = ? AND remaining_quantity > 0", holding.ID).Find(&lots).Error; err != nil {
+	var buys []models.Transaction
+	if err := tx.Where("holding_id = ? AND LOWER(action) = ? AND remaining_quantity > 0", holding.ID, "buy").Find(&buys).Error; err != nil {
 		return err
 	}
 
 	var quantity, costBasisTotal float64
-	for _, lot := range lots {
-		quantity += lot.RemainingQuantity
-		costBasisTotal += lot.RemainingQuantity * lot.PurchasePrice
+	for i := range buys {
+		rem := *buys[i].RemainingQuantity
+		quantity += rem
+		costBasisTotal += rem * lotBasisPerShare(buys[i])
 	}
 
 	holding.Quantity = quantity
@@ -95,18 +152,15 @@ func RecalcHolding(tx *gorm.DB, holding *models.Holding) error {
 		holding.GainUnrealizedPercent = 0
 	}
 
-	// Realized gains come from sells recorded against this holding. Each sell's
-	// amount is the proceeds (qty x price) and realized_gains is the gain, so
-	// the cost basis of the shares sold is proceeds minus the gain. Realized
-	// percent is the total gain over that cost basis.
-	var sells []models.Transaction
-	if err := tx.Where("holding_id = ? AND LOWER(action) = ?", holding.ID, "sell").Find(&sells).Error; err != nil {
+	// Realized gains come straight from the Gain ledger for this holding.
+	var gains []models.Gain
+	if err := tx.Where("holding_id = ? AND category = ?", holding.ID, "capital_gain").Find(&gains).Error; err != nil {
 		return err
 	}
 	var realizedAmount, realizedCostBasis float64
-	for _, sell := range sells {
-		realizedAmount += sell.RealizedGains
-		realizedCostBasis += sell.Amount - sell.RealizedGains
+	for _, g := range gains {
+		realizedAmount += g.Amount
+		realizedCostBasis += g.CostBasis
 	}
 	holding.GainRealizedAmount = realizedAmount
 	if realizedCostBasis > 0 {

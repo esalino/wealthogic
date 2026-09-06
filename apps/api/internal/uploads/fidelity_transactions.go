@@ -193,9 +193,9 @@ func (h *fidelityTransactionsHandler) Process(db *gorm.DB, file io.Reader, opts 
 		for i := len(rows) - 1; i >= 0; i-- {
 			txn := &rows[i].txn
 
-			// A stock buy opens a new tax lot; a stock sell depletes open lots
-			// (FIFO/LIFO per the account) and realizes gains. Options and other
-			// non-stock actions do neither.
+			// A stock buy IS a tax lot (seed its remaining quantity); a stock
+			// sell depletes open lots (FIFO/LIFO per the account) and realizes
+			// gains. Options and other non-stock actions do neither.
 			isBuy := isStockBuy(txn.Action, txn.AssetType) && txn.Quantity != nil && txn.Price != nil
 			isSell := isStockSell(txn.Action, txn.AssetType) && txn.Quantity != nil && txn.Price != nil
 
@@ -221,30 +221,23 @@ func (h *fidelityTransactionsHandler) Process(db *gorm.DB, file io.Reader, opts 
 					return fmt.Errorf("failed to look up holding %s: %w", txn.Symbol, err)
 				}
 				txn.HoldingID = &holding.ID
+				q := *txn.Quantity
+				txn.RemainingQuantity = &q
 				affected[holding.ID] = true
 			}
 
-			var sellAllocations []portfolio.LotAllocation
 			if isSell {
-				// Deplete the holding's open lots for this account. If we have no
-				// holding for the symbol (its buys predate this file), record the
-				// sell as-is without depleting. Imports are lenient: an
-				// unfillable sell realizes only what it could match.
+				// If we have no holding for the symbol (its buys predate this
+				// file), record the sell without depleting.
 				err := tx.Where("symbol = ?", txn.Symbol).First(&holding).Error
 				switch {
 				case errors.Is(err, gorm.ErrRecordNotFound):
-					// nothing to sell against; just record the transaction
+					isSell = false // nothing to sell against; just record it
 				case err != nil:
 					return fmt.Errorf("failed to look up holding %s: %w", txn.Symbol, err)
 				default:
 					txn.HoldingID = &holding.ID
 					affected[holding.ID] = true
-					realized, _, allocations, err := portfolio.DepleteLots(tx, holding.ID, opts.AccountID, *txn.Quantity, *txn.Price, account.DefaultCostBasis)
-					if err != nil {
-						return fmt.Errorf("failed to deplete lots for %s: %w", txn.Symbol, err)
-					}
-					txn.RealizedGains = realized
-					sellAllocations = allocations
 				}
 			}
 
@@ -253,31 +246,17 @@ func (h *fidelityTransactionsHandler) Process(db *gorm.DB, file io.Reader, opts 
 			}
 			result.Created++
 
-			if isBuy {
-				lot := models.TaxLot{
-					AssetType:         *txn.AssetType,
-					Symbol:            txn.Symbol,
-					AssetDescription:  *txn.AssetDescription,
-					PurchaseDate:      txn.Date,
-					PurchaseQuantity:  *txn.Quantity,
-					PurchasePrice:     *txn.Price,
-					RemainingQuantity: *txn.Quantity,
-					HoldingID:         &holding.ID,
-					AccountID:         txn.AccountID,
+			// Deplete lots for the sell now that the transaction exists (Gain
+			// rows link to it). Imports are lenient: an unfillable sell realizes
+			// only what it could match.
+			if isSell {
+				realized, _, err := portfolio.DepleteLots(tx, txn, account.DefaultCostBasis)
+				if err != nil {
+					return fmt.Errorf("failed to deplete lots for %s: %w", txn.Symbol, err)
 				}
-				if err := tx.Create(&lot).Error; err != nil {
-					return fmt.Errorf("failed to create tax lot for %s on %s: %w", txn.Symbol, txn.Date.Format(fidelityDateLayout), err)
-				}
-				// Tie the buy to the lot it opened.
-				if err := tx.Create(&models.TaxLotTransaction{TaxLotID: lot.ID, TransactionID: txn.ID, Quantity: *txn.Quantity}).Error; err != nil {
-					return fmt.Errorf("failed to link buy to lot for %s: %w", txn.Symbol, err)
-				}
-			}
-
-			// Tie the sell to each lot it drew from.
-			for _, a := range sellAllocations {
-				if err := tx.Create(&models.TaxLotTransaction{TaxLotID: a.TaxLotID, TransactionID: txn.ID, Quantity: a.Quantity}).Error; err != nil {
-					return fmt.Errorf("failed to link sell to lot for %s: %w", txn.Symbol, err)
+				txn.RealizedGains = realized
+				if err := tx.Model(txn).Update("realized_gains", realized).Error; err != nil {
+					return fmt.Errorf("failed to set realized gains for %s: %w", txn.Symbol, err)
 				}
 			}
 

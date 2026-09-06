@@ -187,6 +187,12 @@ func (h *transactionHandler) CreateTransaction(c *gin.Context) {
 	isBuy := strings.EqualFold(req.Action, "Buy") && req.HoldingID != nil && req.Quantity != nil && req.Price != nil
 	isSell := strings.EqualFold(req.Action, "Sell") && req.HoldingID != nil && req.Quantity != nil && req.Price != nil
 
+	// A stock buy doubles as a tax lot, so seed its open (remaining) quantity.
+	if isBuy {
+		q := *req.Quantity
+		txn.RemainingQuantity = &q
+	}
+
 	err = h.db.Transaction(func(tx *gorm.DB) error {
 		var holding models.Holding
 		if isBuy || isSell {
@@ -199,32 +205,11 @@ func (h *transactionHandler) CreateTransaction(c *gin.Context) {
 			return err
 		}
 
-		// A buy opens a new lot from the purchase and ties the buy to it.
-		if isBuy {
-			lot := models.TaxLot{
-				AssetType:         holding.AssetType,
-				Symbol:            holding.Symbol,
-				AssetDescription:  holding.Description,
-				PurchaseDate:      date,
-				PurchaseQuantity:  *req.Quantity,
-				PurchasePrice:     *req.Price,
-				RemainingQuantity: *req.Quantity,
-				HoldingID:         &holding.ID,
-				AccountID:         req.AccountID,
-			}
-			if err := tx.Create(&lot).Error; err != nil {
-				return err
-			}
-			if err := tx.Create(&models.TaxLotTransaction{TaxLotID: lot.ID, TransactionID: txn.ID, Quantity: *req.Quantity}).Error; err != nil {
-				return err
-			}
-		}
-
-		// A sell consumes shares from this account's open lots for the holding
-		// (FIFO/LIFO per the account), records the realized gain, and ties the
-		// sell to each lot it drew from. Selling more than is held is rejected.
+		// A sell consumes shares from open buy lots (FIFO/LIFO per the account),
+		// writing a Gain row per lot and recording the realized total. Selling
+		// more than is held is rejected.
 		if isSell {
-			realized, unfilled, allocations, err := portfolio.DepleteLots(tx, holding.ID, req.AccountID, *req.Quantity, *req.Price, account.DefaultCostBasis)
+			realized, unfilled, err := portfolio.DepleteLots(tx, &txn, account.DefaultCostBasis)
 			if err != nil {
 				return err
 			}
@@ -234,11 +219,6 @@ func (h *transactionHandler) CreateTransaction(c *gin.Context) {
 			txn.RealizedGains = realized
 			if err := tx.Save(&txn).Error; err != nil {
 				return err
-			}
-			for _, a := range allocations {
-				if err := tx.Create(&models.TaxLotTransaction{TaxLotID: a.TaxLotID, TransactionID: txn.ID, Quantity: a.Quantity}).Error; err != nil {
-					return err
-				}
 			}
 		}
 
@@ -318,6 +298,20 @@ func (h *transactionHandler) UpdateTransaction(c *gin.Context) {
 		return
 	}
 
+	// A buy doubles as a tax lot; editing one whose shares have already been
+	// sold would corrupt recorded gains. Reject it (revisit later).
+	if strings.EqualFold(txn.Action, "Buy") {
+		disposed, err := buyHasDisposals(h.db, txn.ID)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update transaction"})
+			return
+		}
+		if disposed {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "cannot edit a buy that has already been sold from"})
+			return
+		}
+	}
+
 	// Only the fields the edit form owns are touched; holding_id, symbol,
 	// settlement_date, realized_gains, etc. are preserved.
 	txn.AccountID = req.AccountID
@@ -382,17 +376,36 @@ func (h *transactionHandler) DeleteTransaction(c *gin.Context) {
 		return
 	}
 
+	// A buy that's been sold from can't be removed without corrupting gains.
+	if strings.EqualFold(txn.Action, "Buy") {
+		disposed, err := buyHasDisposals(h.db, txn.ID)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete transaction"})
+			return
+		}
+		if disposed {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "cannot delete a buy that has already been sold from"})
+			return
+		}
+	}
+
+	// Deleting a sell frees shares (lenient rebuild); deleting a buy removes
+	// shares, so the rebuild is strict and rejects if it would over-sell.
+	strict := !strings.EqualFold(txn.Action, "Sell")
+
 	if err := h.db.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Delete(&txn).Error; err != nil {
 			return err
 		}
-		// Removing a sell returns its shares to the lots, so rebuild the holding.
-		// Not strict: a delete only frees shares and must never fail.
 		if txn.HoldingID != nil {
-			return rebuildHolding(tx, *txn.HoldingID, false)
+			return rebuildHolding(tx, *txn.HoldingID, strict)
 		}
 		return nil
 	}); err != nil {
+		if errors.Is(err, errInsufficientShares) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "cannot delete: shares are needed to cover existing sells"})
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete transaction"})
 		return
 	}
@@ -400,18 +413,35 @@ func (h *transactionHandler) DeleteTransaction(c *gin.Context) {
 	c.Status(http.StatusNoContent)
 }
 
-// rebuildHolding recomputes a holding's tax-lot remaining quantities, per-sell
-// realized gains, and aggregates by replaying its sells against its lots from
-// scratch. A single sell's depletion can't be reversed in isolation, so any
-// create/edit/delete of a holding's sell rebuilds the whole holding.
+// buyHasDisposals reports whether any Gain row draws from this buy lot, i.e.
+// shares of it have been sold.
+func buyHasDisposals(db *gorm.DB, buyID uuid.UUID) (bool, error) {
+	var count int64
+	err := db.Model(&models.Gain{}).Where("lot_transaction_id = ?", buyID).Count(&count).Error
+	return count > 0, err
+}
+
+// rebuildHolding recomputes a holding's lot remaining quantities, per-sell
+// realized gains, Gain ledger rows, and aggregates by replaying its sells
+// against its buy lots from scratch. A single sell's depletion can't be reversed
+// in isolation, so any create/edit/delete of a holding's buy or sell rebuilds
+// the whole holding.
 //
 // When strict is set (edits), a sell that can't be fully filled from available
-// shares returns errInsufficientShares so the caller can reject it. Deletes
-// pass strict=false: removing a sell only frees shares, so it must never fail.
+// shares returns errInsufficientShares so the caller can reject it. Deletes of a
+// sell pass strict=false: removing a sell only frees shares, so it must never
+// fail.
 func rebuildHolding(tx *gorm.DB, holdingID uuid.UUID, strict bool) error {
-	// Reset every lot to its full purchased quantity.
-	if err := tx.Model(&models.TaxLot{}).Where("holding_id = ?", holdingID).
-		Update("remaining_quantity", gorm.Expr("purchase_quantity")).Error; err != nil {
+	// Reset every stock buy lot to its full purchased quantity.
+	if err := tx.Model(&models.Transaction{}).
+		Where("holding_id = ? AND LOWER(action) = ? AND remaining_quantity IS NOT NULL", holdingID, "buy").
+		Update("remaining_quantity", gorm.Expr("quantity")).Error; err != nil {
+		return err
+	}
+
+	// Clear this holding's capital-gain ledger; the replay recreates it. Keyed
+	// by holding_id, so it also drops rows from sells that were soft-deleted.
+	if err := tx.Where("holding_id = ? AND category = ?", holdingID, "capital_gain").Delete(&models.Gain{}).Error; err != nil {
 		return err
 	}
 
@@ -420,21 +450,6 @@ func rebuildHolding(tx *gorm.DB, holdingID uuid.UUID, strict bool) error {
 	if err := tx.Where("holding_id = ? AND LOWER(action) = ?", holdingID, "sell").
 		Order("date ASC").Order("id ASC").Find(&sells).Error; err != nil {
 		return err
-	}
-
-	// Clear lot allocations for every sell of this holding - including
-	// soft-deleted ones, whose allocations must also go away - then let the
-	// replay below recreate them for the sells that remain.
-	var allSellIDs []uuid.UUID
-	if err := tx.Unscoped().Model(&models.Transaction{}).
-		Where("holding_id = ? AND LOWER(action) = ?", holdingID, "sell").
-		Pluck("id", &allSellIDs).Error; err != nil {
-		return err
-	}
-	if len(allSellIDs) > 0 {
-		if err := tx.Where("transaction_id IN ?", allSellIDs).Delete(&models.TaxLotTransaction{}).Error; err != nil {
-			return err
-		}
 	}
 
 	costBasisMethod := map[uuid.UUID]string{}
@@ -450,7 +465,7 @@ func rebuildHolding(tx *gorm.DB, holdingID uuid.UUID, strict bool) error {
 				}
 				costBasisMethod[sell.AccountID] = method
 			}
-			r, unfilled, allocations, err := portfolio.DepleteLots(tx, holdingID, sell.AccountID, *sell.Quantity, *sell.Price, method)
+			r, unfilled, err := portfolio.DepleteLots(tx, sell, method)
 			if err != nil {
 				return err
 			}
@@ -460,11 +475,6 @@ func rebuildHolding(tx *gorm.DB, holdingID uuid.UUID, strict bool) error {
 				return errInsufficientShares
 			}
 			realized = r
-			for _, a := range allocations {
-				if err := tx.Create(&models.TaxLotTransaction{TaxLotID: a.TaxLotID, TransactionID: sell.ID, Quantity: a.Quantity}).Error; err != nil {
-					return err
-				}
-			}
 		}
 		sell.RealizedGains = realized
 		if err := tx.Save(sell).Error; err != nil {

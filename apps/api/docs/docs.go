@@ -321,7 +321,7 @@ const docTemplate = `{
                 }
             },
             "post": {
-                "description": "Records a purchase lot against a holding and, in the same transaction, the buy transaction that produced it.",
+                "description": "Records a stock buy against a holding. The buy transaction is the tax lot.",
                 "consumes": [
                     "application/json"
                 ],
@@ -373,7 +373,7 @@ const docTemplate = `{
         },
         "/tax-lots/{id}": {
             "patch": {
-                "description": "Updates the lot and recomputes the holding's position from its open lots. The originally recorded buy transaction is left as-is.",
+                "description": "Updates the buy transaction behind the lot and recomputes the holding. Rejected if the lot has already been sold from.",
                 "consumes": [
                     "application/json"
                 ],
@@ -387,7 +387,7 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "Tax lot ID",
+                        "description": "Tax lot (buy transaction) ID",
                         "name": "id",
                         "in": "path",
                         "required": true
@@ -1268,7 +1268,6 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "holding_id": {
-                    "description": "HoldingID is nil until a matching Holding exists to link to - imported\ntransactions and holdings come from separate Fidelity exports and may\nnot arrive in the same order.",
                     "type": "string"
                 },
                 "id": {
@@ -1349,6 +1348,10 @@ const docTemplate = `{
                     "type": "number"
                 },
                 "realized_gains": {
+                    "type": "number"
+                },
+                "remaining_quantity": {
+                    "description": "RemainingQuantity is set only on a stock buy, which doubles as a tax lot:\nit's the shares of this purchase still open (quantity minus what later\nsells have disposed). Nil for sells and other actions. Maintained as a\ncache by the recompute; the Gain ledger is the source of truth.",
                     "type": "number"
                 },
                 "settlement_date": {
