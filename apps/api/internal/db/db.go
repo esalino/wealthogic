@@ -31,7 +31,7 @@ func Connect() (*gorm.DB, error) {
 		return nil, err
 	}
 
-	if err := db.AutoMigrate(&models.User{}, &models.Account{}, &models.Holding{}, &models.TaxLot{}, &models.Transaction{}, &models.Upload{}, &models.UploadTransaction{}); err != nil {
+	if err := db.AutoMigrate(&models.User{}, &models.Account{}, &models.Holding{}, &models.TaxLot{}, &models.Transaction{}, &models.TaxLotTransaction{}, &models.Upload{}, &models.UploadTransaction{}); err != nil {
 		return nil, err
 	}
 

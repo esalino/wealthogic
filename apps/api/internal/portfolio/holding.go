@@ -10,13 +10,22 @@ import (
 	"gorm.io/gorm"
 )
 
+// LotAllocation records that a sell drew `Quantity` shares from a specific tax
+// lot. Callers turn these into TaxLotTransaction rows so a disposal can be
+// resolved lot-by-lot for taxes.
+type LotAllocation struct {
+	TaxLotID uuid.UUID
+	Quantity float64
+}
+
 // DepleteLots consumes `quantity` shares from a holding's open lots in the given
 // account, in the account's cost-basis order (FIFO oldest-first by default,
 // LIFO newest-first), reducing each lot's remaining quantity and saving it. It
-// returns the realized gain against sellPrice and the quantity it could NOT fill
-// (0 when there were enough shares). Callers that must reject an over-sell check
-// the returned unfilled amount; lenient callers (imports) ignore it.
-func DepleteLots(tx *gorm.DB, holdingID, accountID uuid.UUID, quantity, sellPrice float64, costBasisMethod string) (realized, unfilled float64, err error) {
+// returns the realized gain against sellPrice, the quantity it could NOT fill
+// (0 when there were enough shares), and the per-lot allocations it made.
+// Callers that must reject an over-sell check the unfilled amount; lenient
+// callers (imports) ignore it.
+func DepleteLots(tx *gorm.DB, holdingID, accountID uuid.UUID, quantity, sellPrice float64, costBasisMethod string) (realized, unfilled float64, allocations []LotAllocation, err error) {
 	// Sells may be recorded with a negative quantity (Fidelity's convention),
 	// so work with the magnitude.
 	if quantity < 0 {
@@ -31,7 +40,7 @@ func DepleteLots(tx *gorm.DB, holdingID, accountID uuid.UUID, quantity, sellPric
 	var lots []models.TaxLot
 	if err := tx.Where("holding_id = ? AND account_id = ? AND remaining_quantity > 0", holdingID, accountID).
 		Order(dateOrder).Order(idOrder).Find(&lots).Error; err != nil {
-		return 0, 0, err
+		return 0, 0, nil, err
 	}
 
 	remaining := quantity
@@ -46,11 +55,12 @@ func DepleteLots(tx *gorm.DB, holdingID, accountID uuid.UUID, quantity, sellPric
 		realized += (sellPrice - lots[i].PurchasePrice) * take
 		lots[i].RemainingQuantity -= take
 		remaining -= take
+		allocations = append(allocations, LotAllocation{TaxLotID: lots[i].ID, Quantity: take})
 		if err := tx.Save(&lots[i]).Error; err != nil {
-			return 0, 0, err
+			return 0, 0, nil, err
 		}
 	}
-	return realized, remaining, nil
+	return realized, remaining, allocations, nil
 }
 
 // RecalcHolding recomputes a holding's aggregates and saves them: position

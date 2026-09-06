@@ -243,18 +243,19 @@ function SubPanel({ holding, activeTab, onTabChange, onAddLot, onEditLot, onAddT
                   <th className="px-4 py-2 text-right">Quantity</th>
                   <th className="px-4 py-2 text-right">Price</th>
                   <th className="px-4 py-2 text-right">Amount</th>
+                  <th className="px-4 py-2 text-right">Realized Gain</th>
                   <th className="px-4 py-2 w-10" />
                 </tr>
               </thead>
               <tbody className="divide-y divide-outline-variant">
                 {txnsLoading && (
                   <tr>
-                    <td colSpan={6} className="px-4 py-6 text-center text-body-sm text-on-surface-variant">Loading transactions…</td>
+                    <td colSpan={7} className="px-4 py-6 text-center text-body-sm text-on-surface-variant">Loading transactions…</td>
                   </tr>
                 )}
                 {!txnsLoading && txns.length === 0 && (
                   <tr>
-                    <td colSpan={6} className="px-4 py-6 text-center text-body-sm text-on-surface-variant">No transactions yet.</td>
+                    <td colSpan={7} className="px-4 py-6 text-center text-body-sm text-on-surface-variant">No transactions yet.</td>
                   </tr>
                 )}
                 {!txnsLoading && txns.map((txn) => (
@@ -269,6 +270,9 @@ function SubPanel({ holding, activeTab, onTabChange, onAddLot, onEditLot, onAddT
                     <td className="px-4 py-3 text-right">{txn.price != null ? fmtCurrency(txn.price) : '—'}</td>
                     <td className={`px-4 py-3 text-right ${txn.amount < 0 ? 'text-error' : txn.amount > 0 ? 'text-secondary' : 'text-on-surface'}`}>
                       {fmtSignedCurrency(txn.amount)}
+                    </td>
+                    <td className={`px-4 py-3 text-right ${txn.realized_gains < 0 ? 'text-error' : txn.realized_gains > 0 ? 'text-secondary' : 'text-on-surface-variant'}`}>
+                      {txn.realized_gains !== 0 ? fmtSignedCurrency(txn.realized_gains) : '—'}
                     </td>
                     <td className="px-4 py-3 text-right w-10">
                       <RowMenu onEdit={() => onEditTransaction(txn)} onDelete={() => deleteTxn.mutate(txn.id)} />

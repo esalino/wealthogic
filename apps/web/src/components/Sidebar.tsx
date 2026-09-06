@@ -12,6 +12,7 @@ const navItems: NavItem[] = [
   { to: '/accounts', icon: 'account_balance', label: 'Accounts' },
   { to: '/upload', icon: 'cloud_upload', label: 'Upload Center' },
   { to: '/portfolio', icon: 'pie_chart', label: 'Breakdown' },
+  { to: '/tax', icon: 'receipt_long', label: 'Tax Center' },
 ]
 
 interface SidebarProps {

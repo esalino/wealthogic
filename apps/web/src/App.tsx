@@ -4,6 +4,7 @@ import Dashboard from './pages/Dashboard'
 import Accounts from './pages/Accounts'
 import UploadCenter from './pages/UploadCenter'
 import Portfolio from './pages/Portfolio'
+import TaxCenter from './pages/TaxCenter'
 
 export default function App() {
   return (
@@ -15,6 +16,7 @@ export default function App() {
           <Route path="accounts" element={<Accounts />} />
           <Route path="upload" element={<UploadCenter />} />
           <Route path="portfolio" element={<Portfolio />} />
+          <Route path="tax" element={<TaxCenter />} />
         </Route>
       </Routes>
     </BrowserRouter>

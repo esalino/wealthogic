@@ -191,6 +191,10 @@ func (h *taxLotHandler) CreateTaxLot(c *gin.Context) {
 		if err := tx.Create(&txn).Error; err != nil {
 			return err
 		}
+		// Tie the buy transaction to the lot it opened.
+		if err := tx.Create(&models.TaxLotTransaction{TaxLotID: lot.ID, TransactionID: txn.ID, Quantity: qty}).Error; err != nil {
+			return err
+		}
 		return portfolio.RecalcHolding(tx, &holding)
 	})
 	if err != nil {

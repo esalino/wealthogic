@@ -195,25 +195,11 @@ func (h *transactionHandler) CreateTransaction(c *gin.Context) {
 			}
 		}
 
-		// A sell consumes shares from this account's open lots for the holding
-		// (FIFO/LIFO per the account) and records the realized gain. Selling more
-		// than is held is rejected.
-		if isSell {
-			realized, unfilled, err := portfolio.DepleteLots(tx, holding.ID, req.AccountID, *req.Quantity, *req.Price, account.DefaultCostBasis)
-			if err != nil {
-				return err
-			}
-			if unfilled > 0 {
-				return errInsufficientShares
-			}
-			txn.RealizedGains = realized
-		}
-
 		if err := tx.Create(&txn).Error; err != nil {
 			return err
 		}
 
-		// A buy opens a new lot from the purchase.
+		// A buy opens a new lot from the purchase and ties the buy to it.
 		if isBuy {
 			lot := models.TaxLot{
 				AssetType:         holding.AssetType,
@@ -228,6 +214,31 @@ func (h *transactionHandler) CreateTransaction(c *gin.Context) {
 			}
 			if err := tx.Create(&lot).Error; err != nil {
 				return err
+			}
+			if err := tx.Create(&models.TaxLotTransaction{TaxLotID: lot.ID, TransactionID: txn.ID, Quantity: *req.Quantity}).Error; err != nil {
+				return err
+			}
+		}
+
+		// A sell consumes shares from this account's open lots for the holding
+		// (FIFO/LIFO per the account), records the realized gain, and ties the
+		// sell to each lot it drew from. Selling more than is held is rejected.
+		if isSell {
+			realized, unfilled, allocations, err := portfolio.DepleteLots(tx, holding.ID, req.AccountID, *req.Quantity, *req.Price, account.DefaultCostBasis)
+			if err != nil {
+				return err
+			}
+			if unfilled > 0 {
+				return errInsufficientShares
+			}
+			txn.RealizedGains = realized
+			if err := tx.Save(&txn).Error; err != nil {
+				return err
+			}
+			for _, a := range allocations {
+				if err := tx.Create(&models.TaxLotTransaction{TaxLotID: a.TaxLotID, TransactionID: txn.ID, Quantity: a.Quantity}).Error; err != nil {
+					return err
+				}
 			}
 		}
 
@@ -411,6 +422,21 @@ func rebuildHolding(tx *gorm.DB, holdingID uuid.UUID, strict bool) error {
 		return err
 	}
 
+	// Clear lot allocations for every sell of this holding - including
+	// soft-deleted ones, whose allocations must also go away - then let the
+	// replay below recreate them for the sells that remain.
+	var allSellIDs []uuid.UUID
+	if err := tx.Unscoped().Model(&models.Transaction{}).
+		Where("holding_id = ? AND LOWER(action) = ?", holdingID, "sell").
+		Pluck("id", &allSellIDs).Error; err != nil {
+		return err
+	}
+	if len(allSellIDs) > 0 {
+		if err := tx.Where("transaction_id IN ?", allSellIDs).Delete(&models.TaxLotTransaction{}).Error; err != nil {
+			return err
+		}
+	}
+
 	costBasisMethod := map[uuid.UUID]string{}
 	for i := range sells {
 		sell := &sells[i]
@@ -424,7 +450,7 @@ func rebuildHolding(tx *gorm.DB, holdingID uuid.UUID, strict bool) error {
 				}
 				costBasisMethod[sell.AccountID] = method
 			}
-			r, unfilled, err := portfolio.DepleteLots(tx, holdingID, sell.AccountID, *sell.Quantity, *sell.Price, method)
+			r, unfilled, allocations, err := portfolio.DepleteLots(tx, holdingID, sell.AccountID, *sell.Quantity, *sell.Price, method)
 			if err != nil {
 				return err
 			}
@@ -434,6 +460,11 @@ func rebuildHolding(tx *gorm.DB, holdingID uuid.UUID, strict bool) error {
 				return errInsufficientShares
 			}
 			realized = r
+			for _, a := range allocations {
+				if err := tx.Create(&models.TaxLotTransaction{TaxLotID: a.TaxLotID, TransactionID: sell.ID, Quantity: a.Quantity}).Error; err != nil {
+					return err
+				}
+			}
 		}
 		sell.RealizedGains = realized
 		if err := tx.Save(sell).Error; err != nil {

@@ -224,6 +224,7 @@ func (h *fidelityTransactionsHandler) Process(db *gorm.DB, file io.Reader, opts 
 				affected[holding.ID] = true
 			}
 
+			var sellAllocations []portfolio.LotAllocation
 			if isSell {
 				// Deplete the holding's open lots for this account. If we have no
 				// holding for the symbol (its buys predate this file), record the
@@ -238,11 +239,12 @@ func (h *fidelityTransactionsHandler) Process(db *gorm.DB, file io.Reader, opts 
 				default:
 					txn.HoldingID = &holding.ID
 					affected[holding.ID] = true
-					realized, _, err := portfolio.DepleteLots(tx, holding.ID, opts.AccountID, *txn.Quantity, *txn.Price, account.DefaultCostBasis)
+					realized, _, allocations, err := portfolio.DepleteLots(tx, holding.ID, opts.AccountID, *txn.Quantity, *txn.Price, account.DefaultCostBasis)
 					if err != nil {
 						return fmt.Errorf("failed to deplete lots for %s: %w", txn.Symbol, err)
 					}
 					txn.RealizedGains = realized
+					sellAllocations = allocations
 				}
 			}
 
@@ -265,6 +267,17 @@ func (h *fidelityTransactionsHandler) Process(db *gorm.DB, file io.Reader, opts 
 				}
 				if err := tx.Create(&lot).Error; err != nil {
 					return fmt.Errorf("failed to create tax lot for %s on %s: %w", txn.Symbol, txn.Date.Format(fidelityDateLayout), err)
+				}
+				// Tie the buy to the lot it opened.
+				if err := tx.Create(&models.TaxLotTransaction{TaxLotID: lot.ID, TransactionID: txn.ID, Quantity: *txn.Quantity}).Error; err != nil {
+					return fmt.Errorf("failed to link buy to lot for %s: %w", txn.Symbol, err)
+				}
+			}
+
+			// Tie the sell to each lot it drew from.
+			for _, a := range sellAllocations {
+				if err := tx.Create(&models.TaxLotTransaction{TaxLotID: a.TaxLotID, TransactionID: txn.ID, Quantity: a.Quantity}).Error; err != nil {
+					return fmt.Errorf("failed to link sell to lot for %s: %w", txn.Symbol, err)
 				}
 			}
 
