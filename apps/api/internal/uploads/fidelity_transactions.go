@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/eriksalino/wealthogic/api/internal/models"
+	"github.com/eriksalino/wealthogic/api/internal/portfolio"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
@@ -56,6 +57,11 @@ func mapAction(rawAction string) string {
 // open a tax lot.
 func isStockBuy(mappedAction string, assetType *string) bool {
 	return mappedAction == actionBuy && assetType != nil && *assetType == defaultAssetType
+}
+
+// isStockSell mirrors isStockBuy for outright stock sales, which deplete lots.
+func isStockSell(mappedAction string, assetType *string) bool {
+	return mappedAction == actionSell && assetType != nil && *assetType == defaultAssetType
 }
 
 // parsedRow pairs a parsed Transaction (with its mapped action) with the raw
@@ -180,15 +186,18 @@ func (h *fidelityTransactionsHandler) Process(db *gorm.DB, file io.Reader, opts 
 			return fmt.Errorf("failed to create upload: %w", err)
 		}
 
+		// Holdings that got new lots and need their aggregates recomputed.
+		affected := map[uuid.UUID]bool{}
+
 		// Insert oldest first so the PK (UUIDv7) order is chronological.
 		for i := len(rows) - 1; i >= 0; i-- {
 			txn := &rows[i].txn
 
-			// A stock buy opens a new tax lot at the transaction's price and
-			// quantity, and both the transaction and the lot link to the
-			// holding for that symbol. Sells, options, and other non-stock
-			// actions don't - that's a later step.
+			// A stock buy opens a new tax lot; a stock sell depletes open lots
+			// (FIFO/LIFO per the account) and realizes gains. Options and other
+			// non-stock actions do neither.
 			isBuy := isStockBuy(txn.Action, txn.AssetType) && txn.Quantity != nil && txn.Price != nil
+			isSell := isStockSell(txn.Action, txn.AssetType) && txn.Quantity != nil && txn.Price != nil
 
 			var holding models.Holding
 			if isBuy {
@@ -212,6 +221,29 @@ func (h *fidelityTransactionsHandler) Process(db *gorm.DB, file io.Reader, opts 
 					return fmt.Errorf("failed to look up holding %s: %w", txn.Symbol, err)
 				}
 				txn.HoldingID = &holding.ID
+				affected[holding.ID] = true
+			}
+
+			if isSell {
+				// Deplete the holding's open lots for this account. If we have no
+				// holding for the symbol (its buys predate this file), record the
+				// sell as-is without depleting. Imports are lenient: an
+				// unfillable sell realizes only what it could match.
+				err := tx.Where("symbol = ?", txn.Symbol).First(&holding).Error
+				switch {
+				case errors.Is(err, gorm.ErrRecordNotFound):
+					// nothing to sell against; just record the transaction
+				case err != nil:
+					return fmt.Errorf("failed to look up holding %s: %w", txn.Symbol, err)
+				default:
+					txn.HoldingID = &holding.ID
+					affected[holding.ID] = true
+					realized, _, err := portfolio.DepleteLots(tx, holding.ID, opts.AccountID, *txn.Quantity, *txn.Price, account.DefaultCostBasis)
+					if err != nil {
+						return fmt.Errorf("failed to deplete lots for %s: %w", txn.Symbol, err)
+					}
+					txn.RealizedGains = realized
+				}
 			}
 
 			if err := tx.Create(txn).Error; err != nil {
@@ -256,6 +288,18 @@ func (h *fidelityTransactionsHandler) Process(db *gorm.DB, file io.Reader, opts 
 			}
 			if err := tx.Create(&uploadTxn).Error; err != nil {
 				return fmt.Errorf("failed to create upload transaction for %s on %s: %w", txn.Symbol, txn.Date.Format(fidelityDateLayout), err)
+			}
+		}
+
+		// Recompute each holding that got new lots so its quantity, cost basis,
+		// and value reflect the imported buys.
+		for holdingID := range affected {
+			var holding models.Holding
+			if err := tx.First(&holding, "id = ?", holdingID).Error; err != nil {
+				return fmt.Errorf("failed to load holding %s for recompute: %w", holdingID, err)
+			}
+			if err := portfolio.RecalcHolding(tx, &holding); err != nil {
+				return fmt.Errorf("failed to recompute holding %s: %w", holding.Symbol, err)
 			}
 		}
 		return nil

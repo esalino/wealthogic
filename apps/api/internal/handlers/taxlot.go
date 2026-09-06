@@ -5,6 +5,7 @@ import (
 	"strconv"
 
 	"github.com/eriksalino/wealthogic/api/internal/models"
+	"github.com/eriksalino/wealthogic/api/internal/portfolio"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -190,7 +191,7 @@ func (h *taxLotHandler) CreateTaxLot(c *gin.Context) {
 		if err := tx.Create(&txn).Error; err != nil {
 			return err
 		}
-		return recalcHoldingFromLots(tx, &holding)
+		return portfolio.RecalcHolding(tx, &holding)
 	})
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to add tax lot"})
@@ -200,60 +201,6 @@ func (h *taxLotHandler) CreateTaxLot(c *gin.Context) {
 	c.JSON(http.StatusCreated, taxLotWithTransaction{TaxLot: lot, Transaction: txn})
 }
 
-// recalcHoldingFromLots recomputes a holding's aggregates and saves them:
-// position (quantity, cost basis, current value, unrealized gain) from its open
-// tax lots, and realized gain from the sells recorded against it. Dividend
-// income isn't derived here, so it's left untouched.
-func recalcHoldingFromLots(tx *gorm.DB, holding *models.Holding) error {
-	var lots []models.TaxLot
-	if err := tx.Where("holding_id = ? AND remaining_quantity > 0", holding.ID).Find(&lots).Error; err != nil {
-		return err
-	}
-
-	var quantity, costBasisTotal float64
-	for _, lot := range lots {
-		quantity += lot.RemainingQuantity
-		costBasisTotal += lot.RemainingQuantity * lot.PurchasePrice
-	}
-
-	holding.Quantity = quantity
-	holding.CostBasisTotal = costBasisTotal
-	if quantity > 0 {
-		holding.AverageCostBasis = costBasisTotal / quantity
-	} else {
-		holding.AverageCostBasis = 0
-	}
-
-	holding.CurrentValue = quantity * holding.LastPrice
-	holding.GainUnrealizedAmount = holding.CurrentValue - costBasisTotal
-	if costBasisTotal > 0 {
-		holding.GainUnrealizedPercent = (holding.GainUnrealizedAmount / costBasisTotal) * 100
-	} else {
-		holding.GainUnrealizedPercent = 0
-	}
-
-	// Realized gains come from sells recorded against this holding. Each sell's
-	// amount is the proceeds (qty x price) and realized_gains is the gain, so
-	// the cost basis of the shares sold is proceeds minus the gain. Realized
-	// percent is the total gain over that cost basis.
-	var sells []models.Transaction
-	if err := tx.Where("holding_id = ? AND LOWER(action) = ?", holding.ID, "sell").Find(&sells).Error; err != nil {
-		return err
-	}
-	var realizedAmount, realizedCostBasis float64
-	for _, sell := range sells {
-		realizedAmount += sell.RealizedGains
-		realizedCostBasis += sell.Amount - sell.RealizedGains
-	}
-	holding.GainRealizedAmount = realizedAmount
-	if realizedCostBasis > 0 {
-		holding.GainRealizedPercent = (realizedAmount / realizedCostBasis) * 100
-	} else {
-		holding.GainRealizedPercent = 0
-	}
-
-	return tx.Save(holding).Error
-}
 
 type updateTaxLotRequest struct {
 	AccountID        uuid.UUID `json:"account_id"`
@@ -329,7 +276,7 @@ func (h *taxLotHandler) UpdateTaxLot(c *gin.Context) {
 		if err := tx.First(&holding, "id = ?", *lot.HoldingID).Error; err != nil {
 			return err
 		}
-		return recalcHoldingFromLots(tx, &holding)
+		return portfolio.RecalcHolding(tx, &holding)
 	})
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update tax lot"})

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/eriksalino/wealthogic/api/internal/models"
+	"github.com/eriksalino/wealthogic/api/internal/portfolio"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -194,42 +195,16 @@ func (h *transactionHandler) CreateTransaction(c *gin.Context) {
 			}
 		}
 
-		// A sell consumes shares from this account's open lots for the holding,
-		// in the account's cost-basis order (FIFO oldest-first by default, LIFO
-		// newest-first), and records the realized gain on the transaction.
+		// A sell consumes shares from this account's open lots for the holding
+		// (FIFO/LIFO per the account) and records the realized gain. Selling more
+		// than is held is rejected.
 		if isSell {
-			dateOrder, idOrder := "purchase_date ASC", "id ASC"
-			if strings.EqualFold(account.DefaultCostBasis, "LIFO") {
-				dateOrder, idOrder = "purchase_date DESC", "id DESC"
-			}
-			var lots []models.TaxLot
-			if err := tx.Where("holding_id = ? AND account_id = ? AND remaining_quantity > 0", holding.ID, req.AccountID).
-				Order(dateOrder).Order(idOrder).Find(&lots).Error; err != nil {
+			realized, unfilled, err := portfolio.DepleteLots(tx, holding.ID, req.AccountID, *req.Quantity, *req.Price, account.DefaultCostBasis)
+			if err != nil {
 				return err
 			}
-			var available float64
-			for i := range lots {
-				available += lots[i].RemainingQuantity
-			}
-			if *req.Quantity > available {
+			if unfilled > 0 {
 				return errInsufficientShares
-			}
-			toSell := *req.Quantity
-			var realized float64
-			for i := range lots {
-				if toSell <= 0 {
-					break
-				}
-				take := lots[i].RemainingQuantity
-				if take > toSell {
-					take = toSell
-				}
-				realized += (*req.Price - lots[i].PurchasePrice) * take
-				lots[i].RemainingQuantity -= take
-				toSell -= take
-				if err := tx.Save(&lots[i]).Error; err != nil {
-					return err
-				}
 			}
 			txn.RealizedGains = realized
 		}
@@ -257,7 +232,7 @@ func (h *transactionHandler) CreateTransaction(c *gin.Context) {
 		}
 
 		if isBuy || isSell {
-			return recalcHoldingFromLots(tx, &holding)
+			return portfolio.RecalcHolding(tx, &holding)
 		}
 		return nil
 	})
@@ -449,37 +424,16 @@ func rebuildHolding(tx *gorm.DB, holdingID uuid.UUID, strict bool) error {
 				}
 				costBasisMethod[sell.AccountID] = method
 			}
-			dateOrder, idOrder := "purchase_date ASC", "id ASC"
-			if strings.EqualFold(method, "LIFO") {
-				dateOrder, idOrder = "purchase_date DESC", "id DESC"
-			}
-
-			var lots []models.TaxLot
-			if err := tx.Where("holding_id = ? AND account_id = ? AND remaining_quantity > 0", holdingID, sell.AccountID).
-				Order(dateOrder).Order(idOrder).Find(&lots).Error; err != nil {
+			r, unfilled, err := portfolio.DepleteLots(tx, holdingID, sell.AccountID, *sell.Quantity, *sell.Price, method)
+			if err != nil {
 				return err
-			}
-			toSell := *sell.Quantity
-			for li := range lots {
-				if toSell <= 0 {
-					break
-				}
-				take := lots[li].RemainingQuantity
-				if take > toSell {
-					take = toSell
-				}
-				realized += (*sell.Price - lots[li].PurchasePrice) * take
-				lots[li].RemainingQuantity -= take
-				toSell -= take
-				if err := tx.Save(&lots[li]).Error; err != nil {
-					return err
-				}
 			}
 			// Strict callers (edits) reject a sell that can't be fully filled
 			// from the available shares.
-			if strict && toSell > 1e-9 {
+			if strict && unfilled > 1e-9 {
 				return errInsufficientShares
 			}
+			realized = r
 		}
 		sell.RealizedGains = realized
 		if err := tx.Save(sell).Error; err != nil {
@@ -491,5 +445,5 @@ func rebuildHolding(tx *gorm.DB, holdingID uuid.UUID, strict bool) error {
 	if err := tx.First(&holding, "id = ?", holdingID).Error; err != nil {
 		return err
 	}
-	return recalcHoldingFromLots(tx, &holding)
+	return portfolio.RecalcHolding(tx, &holding)
 }
