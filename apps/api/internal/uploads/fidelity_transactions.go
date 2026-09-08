@@ -38,30 +38,34 @@ const (
 	actionSell = "Sell"
 )
 
+// These match assetTypeFor's classification for treasury bills/notes and ETFs,
+// both of which form tax lots like plain stocks.
+const (
+	treasuryAssetType = "Treasury"
+	etfAssetType      = "ETF"
+)
+
 // mapAction normalizes a raw Fidelity action (e.g. "YOU BOUGHT ...") into the
-// app's action vocabulary. Anything not mapped yet passes through raw.
+// app's action vocabulary. A treasury maturing ("REDEMPTION PAYOUT ...") is a
+// disposal, so it maps to a sell. Anything not mapped yet passes through raw.
 func mapAction(rawAction string) string {
 	upper := strings.ToUpper(rawAction)
 	switch {
 	case strings.HasPrefix(upper, "YOU BOUGHT"):
 		return actionBuy
-	case strings.HasPrefix(upper, "YOU SOLD"):
+	case strings.HasPrefix(upper, "YOU SOLD"), strings.HasPrefix(upper, "REDEMPTION PAYOUT"):
 		return actionSell
 	default:
 		return rawAction
 	}
 }
 
-// isStockBuy reports whether a mapped transaction is an outright stock purchase
-// (as opposed to an ETF, option, treasury, or other non-stock buy). Only these
-// open a tax lot.
-func isStockBuy(mappedAction string, assetType *string) bool {
-	return mappedAction == actionBuy && assetType != nil && *assetType == defaultAssetType
-}
-
-// isStockSell mirrors isStockBuy for outright stock sales, which deplete lots.
-func isStockSell(mappedAction string, assetType *string) bool {
-	return mappedAction == actionSell && assetType != nil && *assetType == defaultAssetType
+// isLotForming reports whether an asset type is tracked as tax lots. Stocks,
+// ETFs, and treasuries are - they realize capital gains on sale; options and
+// cash aren't yet.
+func isLotForming(assetType *string) bool {
+	return assetType != nil &&
+		(*assetType == defaultAssetType || *assetType == etfAssetType || *assetType == treasuryAssetType)
 }
 
 // parsedRow pairs a parsed Transaction (with its mapped action) with the raw
@@ -146,6 +150,22 @@ func (h *fidelityTransactionsHandler) Process(db *gorm.DB, file io.Reader, opts 
 			assetDescription = &description
 		}
 
+		quantity := parseDollarPtr(record[txnColQuantity])
+		price := parseDollarPtr(record[txnColPrice])
+		amount := parseDollar(record[txnColAmount])
+
+		// Treasuries quote price per $100 of face value while quantity is the
+		// face value, so the raw price is off by scale. Derive the effective
+		// per-unit price from the actual amount instead - exact, and treasuries
+		// carry no commission/fees.
+		if assetType != nil && *assetType == treasuryAssetType && quantity != nil && *quantity != 0 && amount != 0 {
+			perUnit := amount / *quantity
+			if perUnit < 0 {
+				perUnit = -perUnit
+			}
+			price = &perUnit
+		}
+
 		rows = append(rows, parsedRow{
 			rawAction: rawAction,
 			txn: models.Transaction{
@@ -155,9 +175,9 @@ func (h *fidelityTransactionsHandler) Process(db *gorm.DB, file io.Reader, opts 
 				AssetDescription: assetDescription,
 				Action:           mapAction(rawAction),
 				Date:             date,
-				Quantity:         parseDollarPtr(record[txnColQuantity]),
-				Price:            parseDollarPtr(record[txnColPrice]),
-				Amount:           parseDollar(record[txnColAmount]),
+				Quantity:         quantity,
+				Price:            price,
+				Amount:           amount,
 				Commission:       parseDollar(record[txnColCommission]),
 				Fees:             parseDollar(record[txnColFees]),
 				SettlementDate:   parseDatePtr(record[txnColSettlementDate]),
@@ -193,11 +213,12 @@ func (h *fidelityTransactionsHandler) Process(db *gorm.DB, file io.Reader, opts 
 		for i := len(rows) - 1; i >= 0; i-- {
 			txn := &rows[i].txn
 
-			// A stock buy IS a tax lot (seed its remaining quantity); a stock
-			// sell depletes open lots (FIFO/LIFO per the account) and realizes
-			// gains. Options and other non-stock actions do neither.
-			isBuy := isStockBuy(txn.Action, txn.AssetType) && txn.Quantity != nil && txn.Price != nil
-			isSell := isStockSell(txn.Action, txn.AssetType) && txn.Quantity != nil && txn.Price != nil
+			// A lot-forming buy (stock or treasury) IS a tax lot (seed its
+			// remaining quantity); the matching sell/redemption depletes open
+			// lots (FIFO/LIFO per the account) and realizes gains. Options and
+			// other non-lot actions do neither.
+			isBuy := txn.Action == actionBuy && isLotForming(txn.AssetType) && txn.Quantity != nil && txn.Price != nil
+			isSell := txn.Action == actionSell && isLotForming(txn.AssetType) && txn.Quantity != nil && txn.Price != nil
 
 			var holding models.Holding
 			if isBuy {

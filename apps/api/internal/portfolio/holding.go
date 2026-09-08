@@ -52,6 +52,12 @@ func DepleteLots(tx *gorm.DB, sell *models.Transaction, costBasisMethod string) 
 		return 0, 0, nil
 	}
 
+	// Load the holding for the canonical asset type/symbol on the Gain rows.
+	var holding models.Holding
+	if err := tx.First(&holding, "id = ?", *sell.HoldingID).Error; err != nil {
+		return 0, 0, err
+	}
+
 	// Sells may be recorded with a negative quantity (Fidelity's convention).
 	sellQty := *sell.Quantity
 	if sellQty < 0 {
@@ -94,7 +100,8 @@ func DepleteLots(tx *gorm.DB, sell *models.Transaction, costBasisMethod string) 
 			Category:         "capital_gain",
 			HoldingID:        sell.HoldingID,
 			AccountID:        sell.AccountID,
-			Symbol:           sell.Symbol,
+			Symbol:           holding.Symbol,
+			AssetType:        holding.AssetType,
 			TransactionID:    sell.ID,
 			LotTransactionID: &buy.ID,
 			AcquiredDate:     buy.Date,

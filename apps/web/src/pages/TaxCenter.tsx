@@ -1,36 +1,12 @@
 import { useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
+import { getGains } from '../api/gains'
 
-// Hardcoded placeholders until this is wired to the tax-lot / transaction APIs.
-// Each row is a realized lot disposal: shares of a purchase lot that were sold.
-interface RealizedGain {
-  asset: string
-  type: string // Stock, Treasury, ETF, Option, Crypto, ...
-  acquired: string // acquisition date (ISO)
-  realized: string // sale date (ISO)
-  gain: number // capital gain/loss for this disposal
-}
-
-const realizedGains: RealizedGain[] = [
-  { asset: 'AAPL', type: 'Stock', acquired: '2023-05-10', realized: '2026-02-15', gain: 4200 },
-  { asset: 'MSFT', type: 'Stock', acquired: '2025-11-01', realized: '2026-03-20', gain: 1500 },
-  { asset: 'TLT', type: 'Treasury', acquired: '2024-01-15', realized: '2026-04-10', gain: -800 },
-  { asset: 'NVDA', type: 'Stock', acquired: '2026-01-05', realized: '2026-06-18', gain: 9800 },
-  { asset: 'VTI', type: 'ETF', acquired: '2022-03-01', realized: '2026-05-22', gain: 12500 },
-  { asset: 'BND', type: 'ETF', acquired: '2025-08-10', realized: '2026-07-01', gain: -350 },
-  { asset: 'KO', type: 'Stock', acquired: '2021-06-15', realized: '2026-01-30', gain: 2100 },
-  { asset: 'T-BILL 04/16', type: 'Treasury', acquired: '2025-10-16', realized: '2026-04-16', gain: 180 },
-  { asset: 'TSLA', type: 'Stock', acquired: '2024-09-12', realized: '2026-08-05', gain: -2300 },
-  { asset: 'AMZN', type: 'Stock', acquired: '2026-02-01', realized: '2026-07-20', gain: 3400 },
-  { asset: 'JPM', type: 'Stock', acquired: '2023-11-20', realized: '2026-03-11', gain: 5600 },
-  { asset: 'ETH', type: 'Crypto', acquired: '2025-12-01', realized: '2026-06-30', gain: 7200 },
-  { asset: 'GOOGL', type: 'Stock', acquired: '2022-01-10', realized: '2025-09-15', gain: 8900 },
-  { asset: 'XOM', type: 'Stock', acquired: '2025-02-01', realized: '2025-11-20', gain: -1200 },
-  { asset: 'BND', type: 'ETF', acquired: '2020-05-05', realized: '2025-06-10', gain: 900 },
-  { asset: 'JNJ', type: 'Stock', acquired: '2019-03-01', realized: '2024-10-05', gain: 3300 },
-]
-
-const YEARS = [2026, 2025, 2024]
 const PAGE_SIZES = [10, 20, 50]
+
+// Recent tax years for the selector; the data drives what actually shows.
+const now = new Date()
+const YEARS = Array.from({ length: 5 }, (_, i) => now.getUTCFullYear() - i)
 
 interface Pagination {
   pageIndex: number
@@ -48,14 +24,8 @@ function gainColor(n: number) {
   return 'text-on-surface'
 }
 
-function daysHeld(acquired: string, realized: string) {
-  return Math.round((new Date(realized).getTime() - new Date(acquired).getTime()) / 86_400_000)
-}
-function isLongTerm(acquired: string, realized: string) {
-  return daysHeld(acquired, realized) >= 365
-}
 function heldLabel(acquired: string, realized: string) {
-  const d = daysHeld(acquired, realized)
+  const d = Math.round((new Date(realized).getTime() - new Date(acquired).getTime()) / 86_400_000)
   const y = Math.floor(d / 365)
   const m = Math.floor((d % 365) / 30)
   if (y > 0) return `${y}y ${m}m`
@@ -113,18 +83,16 @@ function TablePagination({ page, setPage, total }: { page: Pagination; setPage: 
 }
 
 export default function TaxCenter() {
-  const [year, setYear] = useState(2026)
+  const [year, setYear] = useState(now.getUTCFullYear())
   const [page, setPage] = useState<Pagination>({ pageIndex: 0, pageSize: 10 })
 
-  const rows = realizedGains
-    .filter((r) => new Date(r.realized).getUTCFullYear() === year)
-    .sort((a, b) => new Date(b.realized).getTime() - new Date(a.realized).getTime())
+  const { data, isLoading, isError } = useQuery({
+    queryKey: ['gains', year, page.pageIndex, page.pageSize],
+    queryFn: () => getGains(year, page.pageIndex + 1, page.pageSize),
+  })
 
-  const total = rows.reduce((sum, r) => sum + r.gain, 0)
-  const shortTerm = rows.filter((r) => !isLongTerm(r.acquired, r.realized)).reduce((s, r) => s + r.gain, 0)
-  const longTerm = rows.filter((r) => isLongTerm(r.acquired, r.realized)).reduce((s, r) => s + r.gain, 0)
-
-  const pageRows = rows.slice(page.pageIndex * page.pageSize, page.pageIndex * page.pageSize + page.pageSize)
+  const rows = data?.data ?? []
+  const summary = data?.summary ?? { total: 0, short_term: 0, long_term: 0 }
 
   return (
     <div className="p-8">
@@ -148,9 +116,9 @@ export default function TaxCenter() {
 
       {/* Summary tiles */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 mb-6">
-        <StatTile label={`Total Realized ${year}`} value={total} />
-        <StatTile label="Short-term" value={shortTerm} />
-        <StatTile label="Long-term" value={longTerm} />
+        <StatTile label={`Total Realized ${year}`} value={summary.total} />
+        <StatTile label="Short-term" value={summary.short_term} />
+        <StatTile label="Long-term" value={summary.long_term} />
       </div>
 
       {/* Realized gains table */}
@@ -170,36 +138,40 @@ export default function TaxCenter() {
               </tr>
             </thead>
             <tbody>
-              {pageRows.length === 0 && (
-                <tr>
-                  <td colSpan={5} className="px-6 py-10 text-center text-body-md text-on-surface-variant">No realized gains in {year}.</td>
-                </tr>
+              {isLoading && (
+                <tr><td colSpan={5} className="px-6 py-10 text-center text-body-md text-on-surface-variant">Loading gains…</td></tr>
               )}
-              {pageRows.map((r, i) => {
-                const long = isLongTerm(r.acquired, r.realized)
+              {isError && (
+                <tr><td colSpan={5} className="px-6 py-10 text-center text-body-md text-error">Failed to load gains.</td></tr>
+              )}
+              {!isLoading && !isError && rows.length === 0 && (
+                <tr><td colSpan={5} className="px-6 py-10 text-center text-body-md text-on-surface-variant">No realized gains in {year}.</td></tr>
+              )}
+              {rows.map((g) => {
+                const long = g.term === 'long'
                 return (
-                  <tr key={i} className="border-b border-outline-variant last:border-0 hover:bg-surface-container-low transition-colors">
-                    <td className="px-6 py-4 text-body-md font-medium text-on-surface">{r.asset}</td>
+                  <tr key={g.id} className="border-b border-outline-variant last:border-0 hover:bg-surface-container-low transition-colors">
+                    <td className="px-6 py-4 text-body-md font-medium text-on-surface">{g.symbol || '—'}</td>
                     <td className="px-6 py-4">
-                      <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-surface-container-high text-on-surface-variant text-label-sm font-semibold">{r.type}</span>
+                      <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-surface-container-high text-on-surface-variant text-label-sm font-semibold">{g.asset_type || '—'}</span>
                     </td>
-                    <td className="px-6 py-4 text-body-md text-on-surface-variant tabular-nums whitespace-nowrap">{fmtDate(r.realized)}</td>
+                    <td className="px-6 py-4 text-body-md text-on-surface-variant tabular-nums whitespace-nowrap">{fmtDate(g.realized_date)}</td>
                     <td className="px-6 py-4">
                       <div className="flex items-center gap-2">
                         <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-label-sm font-semibold ${long ? 'bg-secondary-container text-on-secondary-container' : 'bg-surface-container-high text-on-surface-variant'}`}>
                           {long ? 'Long-term' : 'Short-term'}
                         </span>
-                        <span className="text-label-sm text-on-surface-variant tabular-nums">{heldLabel(r.acquired, r.realized)}</span>
+                        <span className="text-label-sm text-on-surface-variant tabular-nums">{heldLabel(g.acquired_date, g.realized_date)}</span>
                       </div>
                     </td>
-                    <td className={`px-6 py-4 text-right text-data-tabular font-semibold tabular-nums ${gainColor(r.gain)}`}>{fmtSigned(r.gain)}</td>
+                    <td className={`px-6 py-4 text-right text-data-tabular font-semibold tabular-nums ${gainColor(g.amount)}`}>{fmtSigned(g.amount)}</td>
                   </tr>
                 )
               })}
             </tbody>
           </table>
         </div>
-        <TablePagination page={page} setPage={setPage} total={rows.length} />
+        <TablePagination page={page} setPage={setPage} total={data?.total ?? 0} />
       </div>
     </div>
   )

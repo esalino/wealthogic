@@ -21,6 +21,7 @@ type Gain struct {
 	HoldingID *uuid.UUID `gorm:"type:uuid;index" json:"holding_id"`
 	AccountID uuid.UUID  `gorm:"type:uuid;index" json:"account_id"`
 	Symbol    string     `json:"symbol"`
+	AssetType string     `json:"asset_type"`
 
 	// TransactionID is the realizing transaction (the sell). LotTransactionID is
 	// the buy that supplied the disposed shares (capital gains only).

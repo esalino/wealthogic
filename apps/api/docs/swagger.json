@@ -100,6 +100,54 @@
                 }
             }
         },
+        "/gains": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "gains"
+                ],
+                "summary": "List realized gains with pagination and a year summary",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Filter to the tax year the gain was realized",
+                        "name": "year",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Page number (default 1)",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Items per page (default 20, max 100)",
+                        "name": "page_size",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/PaginatedGains"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/holdings": {
             "get": {
                 "produces": [
@@ -1070,6 +1118,82 @@
                 }
             }
         },
+        "Gain": {
+            "type": "object",
+            "properties": {
+                "account_id": {
+                    "type": "string"
+                },
+                "acquired_date": {
+                    "type": "string"
+                },
+                "amount": {
+                    "description": "realized gain/loss = proceeds - cost_basis",
+                    "type": "number"
+                },
+                "asset_type": {
+                    "type": "string"
+                },
+                "category": {
+                    "type": "string"
+                },
+                "cost_basis": {
+                    "description": "includes the lot's commission and fees",
+                    "type": "number"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "holding_id": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "lot_transaction_id": {
+                    "type": "string"
+                },
+                "proceeds": {
+                    "description": "net of the sell's commission and fees",
+                    "type": "number"
+                },
+                "quantity": {
+                    "description": "shares disposed from the lot",
+                    "type": "number"
+                },
+                "realized_date": {
+                    "type": "string"
+                },
+                "symbol": {
+                    "type": "string"
+                },
+                "term": {
+                    "description": "\"short\" | \"long\"",
+                    "type": "string"
+                },
+                "transaction_id": {
+                    "description": "TransactionID is the realizing transaction (the sell). LotTransactionID is\nthe buy that supplied the disposed shares (capital gains only).",
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "GainSummary": {
+            "type": "object",
+            "properties": {
+                "long_term": {
+                    "type": "number"
+                },
+                "short_term": {
+                    "type": "number"
+                },
+                "total": {
+                    "type": "number"
+                }
+            }
+        },
         "Holding": {
             "type": "object",
             "properties": {
@@ -1140,6 +1264,29 @@
                 },
                 "page_size": {
                     "type": "integer"
+                },
+                "total": {
+                    "type": "integer"
+                }
+            }
+        },
+        "PaginatedGains": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/Gain"
+                    }
+                },
+                "page": {
+                    "type": "integer"
+                },
+                "page_size": {
+                    "type": "integer"
+                },
+                "summary": {
+                    "$ref": "#/definitions/GainSummary"
                 },
                 "total": {
                     "type": "integer"
