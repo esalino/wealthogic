@@ -11,16 +11,10 @@ import {
 } from '../api/holdings'
 import { createTaxLot, getTaxLots, updateTaxLot } from '../api/taxLots'
 import { createTransaction, deleteTransaction, getTransactions, updateTransaction, type Transaction as ApiTransaction } from '../api/transactions'
+import { getDistributions } from '../api/distributions'
 import { getAccounts } from '../api/accounts'
 
 type ChangeDirection = 'positive' | 'negative' | 'neutral'
-
-interface Dividend {
-  date: string
-  perShare: string
-  shares: string
-  total: string
-}
 
 interface Holding {
   id: string
@@ -37,7 +31,6 @@ interface Holding {
   gainRealizedPercent: string
   gainRealizedAmount: string
   dividendIncome: string
-  dividends: Dividend[]
 }
 
 const fmtCurrency = (n: number) =>
@@ -81,7 +74,6 @@ function toViewHolding(h: ApiHolding, totalMarketValue: number): Holding {
     gainRealizedPercent: fmtPercent(h.gain_realized_percent),
     gainRealizedAmount: fmtSignedCurrency(h.gain_realized_amount),
     dividendIncome: fmtCurrency(h.dividend_income),
-    dividends: [],
   }
 }
 
@@ -143,6 +135,13 @@ function SubPanel({ holding, activeTab, onTabChange, onAddLot, onEditLot, onAddT
     queryFn: () => getTransactions(holding.id),
   })
   const txns = txnsData?.data ?? []
+
+  // Dividends/interest paid on this holding, from the distribution ledger.
+  const { data: distsData, isLoading: distsLoading } = useQuery({
+    queryKey: ['distributions', holding.id],
+    queryFn: () => getDistributions(holding.id),
+  })
+  const dists = distsData?.data ?? []
 
   const queryClient = useQueryClient()
   const deleteTxn = useMutation({
@@ -288,19 +287,31 @@ function SubPanel({ holding, activeTab, onTabChange, onAddLot, onEditLot, onAddT
               <thead className="bg-surface-container-low">
                 <tr className="text-[10px] text-label-caps text-on-surface-variant uppercase">
                   <th className="px-4 py-2">Date</th>
-                  <th className="px-4 py-2 text-right">Per Share</th>
-                  <th className="px-4 py-2 text-right">Shares</th>
-                  <th className="px-4 py-2 text-right">Total</th>
+                  <th className="px-4 py-2">Type</th>
+                  <th className="px-4 py-2 text-right">Amount</th>
                   <th className="px-4 py-2 w-10" />
                 </tr>
               </thead>
               <tbody className="divide-y divide-outline-variant">
-                {holding.dividends.map((div, i) => (
-                  <tr key={i} className="text-data-tabular text-on-surface tabular-nums">
-                    <td className="px-4 py-3">{div.date}</td>
-                    <td className="px-4 py-3 text-right">{div.perShare}</td>
-                    <td className="px-4 py-3 text-right">{div.shares}</td>
-                    <td className="px-4 py-3 text-right text-secondary">{div.total}</td>
+                {distsLoading && (
+                  <tr>
+                    <td colSpan={4} className="px-4 py-6 text-center text-body-sm text-on-surface-variant">Loading dividends…</td>
+                  </tr>
+                )}
+                {!distsLoading && dists.length === 0 && (
+                  <tr>
+                    <td colSpan={4} className="px-4 py-6 text-center text-body-sm text-on-surface-variant">No dividends yet.</td>
+                  </tr>
+                )}
+                {!distsLoading && dists.map((dist) => (
+                  <tr key={dist.id} className="text-data-tabular text-on-surface tabular-nums">
+                    <td className="px-4 py-3">{fmtDate(dist.payment_date)}</td>
+                    <td className="px-4 py-3">
+                      <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-surface-container-high text-on-surface-variant text-[10px] font-bold capitalize">
+                        {dist.category}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-right text-secondary">{fmtSignedCurrency(dist.amount)}</td>
                     {rowActions()}
                   </tr>
                 ))}

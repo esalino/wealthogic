@@ -35,6 +35,7 @@ func main() {
 	taxLotHandler := handlers.NewTaxLotHandler(database)
 	transactionHandler := handlers.NewTransactionHandler(database)
 	gainHandler := handlers.NewGainHandler(database)
+	distributionHandler := handlers.NewDistributionHandler(database)
 	userHandler := handlers.NewUserHandler(database)
 	uploadHandler := handlers.NewUploadHandler(database)
 
@@ -65,6 +66,7 @@ func main() {
 	r.POST("/tax-lots", taxLotHandler.CreateTaxLot)
 	r.PATCH("/tax-lots/:id", taxLotHandler.UpdateTaxLot)
 	r.GET("/gains", gainHandler.GetGains)
+	r.GET("/distributions", distributionHandler.GetDistributions)
 	r.GET("/transactions", transactionHandler.GetTransactions)
 	r.POST("/transactions", transactionHandler.CreateTransaction)
 	r.PATCH("/transactions/:id", transactionHandler.UpdateTransaction)

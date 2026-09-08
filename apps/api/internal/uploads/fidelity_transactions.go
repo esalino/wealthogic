@@ -34,8 +34,9 @@ const fidelityDateLayout = "01/02/2006"
 // The app's normalized action vocabulary. Only buys and sells are mapped for
 // now; any other raw action passes through unchanged.
 const (
-	actionBuy  = "Buy"
-	actionSell = "Sell"
+	actionBuy      = "Buy"
+	actionSell     = "Sell"
+	actionDividend = "Dividend"
 )
 
 // These match assetTypeFor's classification for treasury bills/notes and ETFs,
@@ -55,6 +56,10 @@ func mapAction(rawAction string) string {
 		return actionBuy
 	case strings.HasPrefix(upper, "YOU SOLD"), strings.HasPrefix(upper, "REDEMPTION PAYOUT"):
 		return actionSell
+	case strings.HasPrefix(upper, "DIVIDEND"):
+		// A cash dividend received. Reinvestments ("REINVESTMENT ...") aren't
+		// mapped yet - they also open a lot, so they stay pass-through for now.
+		return actionDividend
 	default:
 		return rawAction
 	}
@@ -213,6 +218,50 @@ func (h *fidelityTransactionsHandler) Process(db *gorm.DB, file io.Reader, opts 
 		for i := len(rows) - 1; i >= 0; i-- {
 			txn := &rows[i].txn
 
+			// Dividends (and later interest) are income, not trades - route them
+			// to the distribution ledger and keep them out of transactions and
+			// lot math entirely. Symbol/asset type may be unset (e.g. a dividend
+			// row where the source left the symbol column blank); the row is
+			// still income, so it belongs here regardless.
+			if txn.Action == actionDividend {
+				dist := models.Distribution{
+					Category:    "dividend",
+					AccountID:   opts.AccountID,
+					Symbol:      txn.Symbol,
+					AssetType:   txn.AssetType,
+					PaymentDate: txn.Date,
+					Amount:      txn.Amount,
+				}
+				// Link to an existing holding if there is one; a dividend never
+				// creates a holding on its own.
+				var holding models.Holding
+				switch err := tx.Where("symbol = ?", txn.Symbol).First(&holding).Error; {
+				case err == nil:
+					dist.HoldingID = &holding.ID
+				case !errors.Is(err, gorm.ErrRecordNotFound):
+					return fmt.Errorf("failed to look up holding %s: %w", txn.Symbol, err)
+				}
+				if err := tx.Create(&dist).Error; err != nil {
+					return fmt.Errorf("failed to create distribution for %s on %s: %w", txn.Symbol, txn.Date.Format(fidelityDateLayout), err)
+				}
+				result.Created++
+
+				uploadTxn := models.UploadTransaction{
+					AssetType:        txn.AssetType,
+					Symbol:           txn.Symbol,
+					AssetDescription: txn.AssetDescription,
+					Action:           rows[i].rawAction,
+					Date:             txn.Date,
+					Amount:           txn.Amount,
+					DistributionID:   &dist.ID,
+					UploadID:         upload.ID,
+				}
+				if err := tx.Create(&uploadTxn).Error; err != nil {
+					return fmt.Errorf("failed to create upload transaction for %s on %s: %w", txn.Symbol, txn.Date.Format(fidelityDateLayout), err)
+				}
+				continue
+			}
+
 			// A lot-forming buy (stock or treasury) IS a tax lot (seed its
 			// remaining quantity); the matching sell/redemption depletes open
 			// lots (FIFO/LIFO per the account) and realizes gains. Options and
@@ -296,7 +345,7 @@ func (h *fidelityTransactionsHandler) Process(db *gorm.DB, file io.Reader, opts 
 				Fees:             txn.Fees,
 				SettlementDate:   txn.SettlementDate,
 				RealizedGains:    txn.RealizedGains,
-				TransactionID:    txn.ID,
+				TransactionID:    &txn.ID,
 				UploadID:         upload.ID,
 			}
 			if err := tx.Create(&uploadTxn).Error; err != nil {

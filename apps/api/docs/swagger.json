@@ -100,6 +100,69 @@
                 }
             }
         },
+        "/distributions": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "distributions"
+                ],
+                "summary": "List income distributions (dividends/interest) with pagination and a year summary",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Filter to the tax year the income was paid",
+                        "name": "year",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter to a single holding",
+                        "name": "holding_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Page number (default 1)",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Items per page (default 20, max 100)",
+                        "name": "page_size",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/PaginatedDistributions"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/gains": {
             "get": {
                 "produces": [
@@ -1118,6 +1181,61 @@
                 }
             }
         },
+        "Distribution": {
+            "type": "object",
+            "properties": {
+                "account_id": {
+                    "type": "string"
+                },
+                "amount": {
+                    "type": "number"
+                },
+                "asset_type": {
+                    "type": "string"
+                },
+                "category": {
+                    "description": "Category is the kind of income: \"dividend\" (from a security) or \"interest\"\n(from a cash/savings balance, handled later).",
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "holding_id": {
+                    "description": "HoldingID, Symbol, and AssetType identify the paying security. Symbol and\nAssetType are unset for account-level income like bank interest, and\nHoldingID is nil until a matching holding exists to link to.",
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "payment_date": {
+                    "type": "string"
+                },
+                "symbol": {
+                    "type": "string"
+                },
+                "transaction_id": {
+                    "description": "TransactionID is nil for a cash dividend or interest payment. It's reserved\nfor a reinvested dividend, which also opens a buy lot - not handled yet.",
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "DistributionSummary": {
+            "type": "object",
+            "properties": {
+                "dividend": {
+                    "type": "number"
+                },
+                "interest": {
+                    "type": "number"
+                },
+                "total": {
+                    "type": "number"
+                }
+            }
+        },
         "Gain": {
             "type": "object",
             "properties": {
@@ -1264,6 +1382,29 @@
                 },
                 "page_size": {
                     "type": "integer"
+                },
+                "total": {
+                    "type": "integer"
+                }
+            }
+        },
+        "PaginatedDistributions": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/Distribution"
+                    }
+                },
+                "page": {
+                    "type": "integer"
+                },
+                "page_size": {
+                    "type": "integer"
+                },
+                "summary": {
+                    "$ref": "#/definitions/DistributionSummary"
                 },
                 "total": {
                     "type": "integer"
@@ -1661,6 +1802,9 @@
                 "date": {
                     "type": "string"
                 },
+                "distribution_id": {
+                    "type": "string"
+                },
                 "fees": {
                     "type": "number"
                 },
@@ -1683,7 +1827,7 @@
                     "type": "string"
                 },
                 "transaction_id": {
-                    "description": "TransactionID links this to its Transaction. A transaction has 0 or 1\nupload_transaction (enforced by the unique index), and the holding and\naccount can be reached through the transaction.",
+                    "description": "A row links to exactly one of the domain records the import produced: a\nTransaction (trades) or a Distribution (dividends/interest). Both are\nnullable so either kind can be absent; a transaction still has 0 or 1\nupload_transaction (the unique index treats NULLs as distinct, so many\ndistribution rows can share a NULL transaction_id).",
                     "type": "string"
                 },
                 "updated_at": {

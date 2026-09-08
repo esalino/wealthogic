@@ -32,10 +32,13 @@ type UploadTransaction struct {
 
 	RealizedGains float64 `json:"realized_gains"`
 
-	// TransactionID links this to its Transaction. A transaction has 0 or 1
-	// upload_transaction (enforced by the unique index), and the holding and
-	// account can be reached through the transaction.
-	TransactionID uuid.UUID `gorm:"type:uuid;uniqueIndex" json:"transaction_id"`
+	// A row links to exactly one of the domain records the import produced: a
+	// Transaction (trades) or a Distribution (dividends/interest). Both are
+	// nullable so either kind can be absent; a transaction still has 0 or 1
+	// upload_transaction (the unique index treats NULLs as distinct, so many
+	// distribution rows can share a NULL transaction_id).
+	TransactionID  *uuid.UUID `gorm:"type:uuid;uniqueIndex" json:"transaction_id"`
+	DistributionID *uuid.UUID `gorm:"type:uuid;index"       json:"distribution_id"`
 
 	// UploadID ties this row to the file import it came from.
 	UploadID uuid.UUID `gorm:"type:uuid" json:"upload_id"`
