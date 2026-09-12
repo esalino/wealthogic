@@ -22,12 +22,14 @@ func NewDistributionHandler(db *gorm.DB) DistributionHandler {
 	return &distributionHandler{db: db}
 }
 
-// distributionSummary totals a year's income, split by category. Independent of
-// pagination, for summary tiles.
+// distributionSummary totals a year's income, split into tax buckets:
+// qualifiable equity dividends vs. ordinary "other income" (money-market and
+// treasury income, state-exempt holdings' distributions, and interest).
+// Independent of pagination.
 type distributionSummary struct {
-	Total    float64 `json:"total"`
-	Dividend float64 `json:"dividend"`
-	Interest float64 `json:"interest"`
+	Total       float64 `json:"total"`
+	Dividend    float64 `json:"dividend"`
+	OtherIncome float64 `json:"other_income"`
 } // @name DistributionSummary
 
 type paginatedDistributions struct {
@@ -98,15 +100,35 @@ func (h *distributionHandler) GetDistributions(c *gin.Context) {
 		return
 	}
 
-	// Year totals across all matching rows (not just the page).
-	var summary distributionSummary
-	if err := filter(h.db.Model(&models.Distribution{})).
-		Select("COALESCE(SUM(amount), 0) AS total, " +
-			"COALESCE(SUM(amount) FILTER (WHERE category = 'dividend'), 0) AS dividend, " +
-			"COALESCE(SUM(amount) FILTER (WHERE category = 'interest'), 0) AS interest").
-		Scan(&summary).Error; err != nil {
+	// Year totals across all matching rows (not just the page), split into tax
+	// buckets. The dividend-vs-other-income rule depends on the paying security's
+	// tax attributes (asset type, state-exempt override), so resolve it in Go
+	// through the shared classifier rather than in SQL.
+	var all []models.Distribution
+	if err := filter(h.db).Find(&all).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to summarize distributions"})
 		return
+	}
+
+	var holdings []models.Holding
+	if err := h.db.Find(&holdings).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to summarize distributions"})
+		return
+	}
+	bySymbol := make(map[string]*models.Holding, len(holdings))
+	for i := range holdings {
+		bySymbol[holdings[i].Symbol] = &holdings[i]
+	}
+
+	var summary distributionSummary
+	for i := range all {
+		d := all[i]
+		summary.Total += d.Amount
+		if models.IsQualifiableDividend(d, bySymbol[d.Symbol]) {
+			summary.Dividend += d.Amount
+		} else {
+			summary.OtherIncome += d.Amount
+		}
 	}
 
 	var distributions []models.Distribution

@@ -341,6 +341,8 @@ const ASSET_TYPES = ['Stock', 'ETF', 'Mutual Fund', 'Bond', 'Money Market', 'Cry
 
 // ── Shared holding form ───────────────────────────────────────────────────────
 
+type StateTaxChoice = 'auto' | 'exempt' | 'taxable'
+
 interface HoldingFields {
   assetType: string
   symbol: string
@@ -349,6 +351,7 @@ interface HoldingFields {
   lastPrice: string
   avgCostBasis: string
   dividendIncome: string
+  stateTax: StateTaxChoice
 }
 
 const emptyHoldingFields: HoldingFields = {
@@ -359,6 +362,26 @@ const emptyHoldingFields: HoldingFields = {
   lastPrice: '',
   avgCostBasis: '',
   dividendIncome: '',
+  stateTax: 'auto',
+}
+
+// The state-tax override maps to a nullable bool: auto = derive from asset type.
+function stateTaxToOverride(choice: StateTaxChoice): boolean | null {
+  if (choice === 'exempt') return true
+  if (choice === 'taxable') return false
+  return null
+}
+
+function overrideToStateTax(override: boolean | null): StateTaxChoice {
+  if (override === true) return 'exempt'
+  if (override === false) return 'taxable'
+  return 'auto'
+}
+
+// Mirror of the backend's asset-type default, only to label what "Auto" resolves
+// to. The backend stays the source of truth for the actual classification.
+function defaultStateExempt(assetType: string): boolean {
+  return assetType === 'Treasury'
 }
 
 function fieldsFromHolding(h: ApiHolding): HoldingFields {
@@ -370,6 +393,7 @@ function fieldsFromHolding(h: ApiHolding): HoldingFields {
     lastPrice: String(h.last_price ?? ''),
     avgCostBasis: String(h.average_cost_basis ?? ''),
     dividendIncome: String(h.dividend_income ?? ''),
+    stateTax: overrideToStateTax(h.state_tax_exempt ?? null),
   }
 }
 
@@ -389,6 +413,7 @@ function fieldsToPayload(f: HoldingFields): CreateHoldingPayload {
     average_cost_basis: avgCost,
     cost_basis_total: avgCost * qty,
     dividend_income: parseFloat(f.dividendIncome) || 0,
+    state_tax_exempt: stateTaxToOverride(f.stateTax),
   }
 }
 
@@ -486,6 +511,18 @@ function HoldingFormFields({
             />
           </div>
         </div>
+      </div>
+
+      <div>
+        <label className="block text-label-sm font-semibold text-on-surface mb-1.5">State Tax</label>
+        <select value={fields.stateTax} onChange={(e) => set('stateTax', e.target.value as StateTaxChoice)} className={modalInputCls}>
+          <option value="auto">Auto — {defaultStateExempt(fields.assetType) ? 'exempt' : 'taxable'} for {fields.assetType}</option>
+          <option value="exempt">State exempt</option>
+          <option value="taxable">State taxable</option>
+        </select>
+        <p className="mt-1 text-label-sm text-on-surface-variant">
+          Treasuries are exempt by default. Override for a treasury-only fund like TLT.
+        </p>
       </div>
     </div>
   )

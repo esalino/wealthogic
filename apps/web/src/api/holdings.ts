@@ -31,6 +31,10 @@ export interface Holding {
   gain_realized_percent: number
   gain_realized_amount: number
   dividend_income: number
+  // State-tax override: null = auto (derive from asset type), true/false = explicit.
+  state_tax_exempt: boolean | null
+  // Resolved treatment (override, else asset-type default). Read-only.
+  state_exempt: boolean
   created_at: string
   updated_at: string
 }
@@ -65,6 +69,7 @@ export interface CreateHoldingPayload {
   average_cost_basis: number
   cost_basis_total: number
   dividend_income: number
+  state_tax_exempt?: boolean | null
 }
 
 export async function createHolding(payload: CreateHoldingPayload): Promise<Holding> {

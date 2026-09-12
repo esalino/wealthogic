@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { getGains } from '../api/gains'
+import { getDistributions } from '../api/distributions'
 
 const PAGE_SIZES = [10, 20, 50]
 
@@ -33,11 +34,69 @@ function heldLabel(acquired: string, realized: string) {
   return `${d}d`
 }
 
-function StatTile({ label, value }: { label: string; value: number }) {
+// A line in a tax bucket. `signed` colors the value like a gain/loss (green/red)
+// and shows an explicit sign; otherwise it's a plain neutral income amount.
+interface BucketRow {
+  label: string
+  value: number
+  sub?: string // small detail under the label (e.g. the long/short split)
+  note?: string // inline qualifier after the label (e.g. "all ordinary")
+  signed?: boolean
+}
+
+// BucketCard renders one jurisdiction (Federal or State): its taxable buckets
+// and the taxable total. Federal and State intentionally differ in shape -
+// Federal breaks gains down by rate character, State collapses them and instead
+// lists what's excluded.
+function BucketCard({
+  title,
+  subtitle,
+  rows,
+  total,
+  excluded,
+}: {
+  title: string
+  subtitle: string
+  rows: BucketRow[]
+  total: number
+  excluded?: { label: string; value: number }
+}) {
   return (
     <div className="bg-surface-container-lowest rounded-xl shadow-card p-6">
-      <p className="text-label-caps text-on-surface-variant uppercase mb-1">{label}</p>
-      <p className={`text-headline-md font-bold tabular-nums ${gainColor(value)}`}>{fmtSigned(value)}</p>
+      <div className="flex items-start justify-between mb-3">
+        <div>
+          <h3 className="text-label-caps text-on-surface-variant uppercase">{title}</h3>
+          <p className="text-label-sm text-on-surface-variant">{subtitle}</p>
+        </div>
+        <div className="text-right">
+          <p className="text-label-caps text-on-surface-variant uppercase">Taxable</p>
+          <p className="text-headline-md font-bold tabular-nums text-on-surface">{fmtCurrency(total)}</p>
+        </div>
+      </div>
+      <div className="divide-y divide-outline-variant border-t border-outline-variant">
+        {rows.map((r) => (
+          <div key={r.label} className="flex items-baseline justify-between py-2.5">
+            <div>
+              <p className="text-body-md text-on-surface">
+                {r.label}
+                {r.note && <span className="text-label-sm text-on-surface-variant"> · {r.note}</span>}
+              </p>
+              {r.sub && <p className="text-label-sm text-on-surface-variant tabular-nums">{r.sub}</p>}
+            </div>
+            <p className={`text-data-tabular font-semibold tabular-nums ${r.signed ? gainColor(r.value) : 'text-on-surface'}`}>
+              {r.signed ? fmtSigned(r.value) : fmtCurrency(r.value)}
+            </p>
+          </div>
+        ))}
+        {excluded && excluded.value !== 0 && (
+          <div className="flex items-baseline justify-between py-2.5">
+            <p className="text-body-md text-on-surface-variant">{excluded.label}</p>
+            <p className="text-data-tabular font-semibold tabular-nums text-on-surface-variant">
+              -{fmtCurrency(Math.abs(excluded.value))}
+            </p>
+          </div>
+        )}
+      </div>
     </div>
   )
 }
@@ -91,8 +150,24 @@ export default function TaxCenter() {
     queryFn: () => getGains(year, page.pageIndex + 1, page.pageSize),
   })
 
+  // Year-scoped income totals for the buckets. Only the summary is needed here,
+  // so ask for the smallest page.
+  const { data: distData } = useQuery({
+    queryKey: ['distributions', 'summary', year],
+    queryFn: () => getDistributions(undefined, year, 1, 1),
+  })
+
   const rows = data?.data ?? []
-  const summary = data?.summary ?? { total: 0, short_term: 0, long_term: 0 }
+  const gains = data?.summary ?? { total: 0, short_term: 0, long_term: 0 }
+  const income = distData?.summary ?? { total: 0, dividend: 0, other_income: 0 }
+
+  // Buckets over the data we have today. Treasury income is still recorded as a
+  // capital gain (reclassification deferred), so the state-exempt Treasury line
+  // stays dormant at 0 and Federal/State totals match until that lands.
+  const capNet = gains.total
+  const treasuryExempt = 0
+  const fedTaxable = capNet + income.dividend + income.other_income
+  const stateTaxable = fedTaxable - treasuryExempt
 
   return (
     <div className="p-8">
@@ -100,7 +175,7 @@ export default function TaxCenter() {
       <div className="flex items-start justify-between mb-8">
         <div>
           <h1 className="text-headline-lg text-on-surface mb-1">Tax Center</h1>
-          <p className="text-body-lg text-on-surface-variant">Realized capital gains and losses for the tax year.</p>
+          <p className="text-body-lg text-on-surface-variant">Realized gains and taxable income for the tax year.</p>
         </div>
         <div className="flex items-center gap-2">
           <label className="text-label-sm text-on-surface-variant">Tax year</label>
@@ -114,11 +189,34 @@ export default function TaxCenter() {
         </div>
       </div>
 
-      {/* Summary tiles */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 mb-6">
-        <StatTile label={`Total Realized ${year}`} value={summary.total} />
-        <StatTile label="Short-term" value={summary.short_term} />
-        <StatTile label="Long-term" value={summary.long_term} />
+      {/* Tax buckets, split by jurisdiction */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+        <BucketCard
+          title="Federal"
+          subtitle={`Taxable income for ${year}`}
+          total={fedTaxable}
+          rows={[
+            {
+              label: 'Capital gains — net',
+              value: capNet,
+              sub: `long ${fmtSigned(gains.long_term)} · short ${fmtSigned(gains.short_term)}`,
+              signed: true,
+            },
+            { label: 'Dividends', value: income.dividend },
+            { label: 'Interest & other income', value: income.other_income },
+          ]}
+        />
+        <BucketCard
+          title="State"
+          subtitle={`Taxable income for ${year}`}
+          total={stateTaxable}
+          rows={[
+            { label: 'Capital gains — net', value: capNet, signed: true },
+            { label: 'Dividends', value: income.dividend, note: 'all ordinary' },
+            { label: 'Interest & other income', value: income.other_income },
+          ]}
+          excluded={{ label: 'Excluded — U.S. Treasury', value: treasuryExempt }}
+        />
       </div>
 
       {/* Realized gains table */}

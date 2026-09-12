@@ -16,8 +16,8 @@ export interface Distribution {
 
 export interface DistributionSummary {
   total: number
-  dividend: number
-  interest: number
+  dividend: number // qualifiable equity dividends
+  other_income: number // money-market/treasury/state-exempt income + interest
 }
 
 export interface PaginatedDistributions {

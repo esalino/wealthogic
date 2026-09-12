@@ -35,3 +35,22 @@ type Distribution struct {
 	// for a reinvested dividend, which also opens a buy lot - not handled yet.
 	TransactionID *uuid.UUID `gorm:"type:uuid;index" json:"transaction_id"`
 } // @name Distribution
+
+// IsQualifiableDividend reports whether a distribution belongs in the "dividend"
+// tax bucket - income that can carry a qualified/unqualified character (equity
+// dividends). Money-market and treasury income, distributions from a state-exempt
+// (treasury-like) holding, and anything already categorized as interest are
+// ordinary "other income" instead. holding is the paying security, or nil when
+// it isn't tracked.
+func IsQualifiableDividend(d Distribution, holding *Holding) bool {
+	if d.Category != "dividend" {
+		return false
+	}
+	if d.AssetType != nil && (*d.AssetType == AssetTypeMoneyMarket || *d.AssetType == AssetTypeTreasury) {
+		return false
+	}
+	if holding != nil && holding.ResolveStateExempt() {
+		return false
+	}
+	return true
+}

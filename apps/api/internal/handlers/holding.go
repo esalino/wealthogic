@@ -43,6 +43,7 @@ type createHoldingRequest struct {
 	AverageCostBasis float64 `json:"average_cost_basis"`
 	CostBasisTotal   float64 `json:"cost_basis_total"`
 	DividendIncome   float64 `json:"dividend_income"`
+	StateTaxExempt   *bool   `json:"state_tax_exempt"`
 } // @name CreateHoldingRequest
 
 // CreateHolding godoc
@@ -78,6 +79,7 @@ func (h *holdingHandler) CreateHolding(c *gin.Context) {
 		AverageCostBasis: req.AverageCostBasis,
 		CostBasisTotal:   req.CostBasisTotal,
 		DividendIncome:   req.DividendIncome,
+		StateTaxExempt:   req.StateTaxExempt,
 	}
 
 	if err := h.db.Create(&holding).Error; err != nil {
@@ -85,6 +87,7 @@ func (h *holdingHandler) CreateHolding(c *gin.Context) {
 		return
 	}
 
+	holding.StateExempt = holding.ResolveStateExempt()
 	c.JSON(http.StatusCreated, holding)
 }
 
@@ -99,6 +102,7 @@ type updateHoldingRequest struct {
 	AverageCostBasis float64 `json:"average_cost_basis"`
 	CostBasisTotal   float64 `json:"cost_basis_total"`
 	DividendIncome   float64 `json:"dividend_income"`
+	StateTaxExempt   *bool   `json:"state_tax_exempt"`
 } // @name UpdateHoldingRequest
 
 // UpdateHolding godoc
@@ -146,15 +150,23 @@ func (h *holdingHandler) UpdateHolding(c *gin.Context) {
 	holding.AverageCostBasis = req.AverageCostBasis
 	holding.CostBasisTotal = req.CostBasisTotal
 	holding.DividendIncome = req.DividendIncome
+	// Authoritative: nil clears the override back to the asset-type default.
+	holding.StateTaxExempt = req.StateTaxExempt
 
 	holding.GainUnrealizedAmount = holding.CurrentValue - holding.CostBasisTotal
-	holding.GainUnrealizedPercent = holding.GainUnrealizedAmount / holding.CostBasisTotal * 100
+	// Avoid NaN/Inf (which JSON can't marshal) when there's no cost basis yet.
+	if holding.CostBasisTotal != 0 {
+		holding.GainUnrealizedPercent = holding.GainUnrealizedAmount / holding.CostBasisTotal * 100
+	} else {
+		holding.GainUnrealizedPercent = 0
+	}
 
 	if err := h.db.Save(&holding).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update holding"})
 		return
 	}
 
+	holding.StateExempt = holding.ResolveStateExempt()
 	c.JSON(http.StatusOK, holding)
 }
 

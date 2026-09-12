@@ -1082,6 +1082,9 @@ const docTemplate = `{
                 "purchase_quantity": {
                     "type": "number"
                 },
+                "state_tax_exempt": {
+                    "type": "boolean"
+                },
                 "status": {
                     "type": "string"
                 },
@@ -1234,7 +1237,7 @@ const docTemplate = `{
                 "dividend": {
                     "type": "number"
                 },
-                "interest": {
+                "other_income": {
                     "type": "number"
                 },
                 "total": {
@@ -1362,6 +1365,14 @@ const docTemplate = `{
                 },
                 "purchase_quantity": {
                     "type": "number"
+                },
+                "state_exempt": {
+                    "description": "StateExempt is the resolved treatment (override, else the asset-type\ndefault), computed for responses via AfterFind and never persisted.",
+                    "type": "boolean"
+                },
+                "state_tax_exempt": {
+                    "description": "StateTaxExempt overrides the state-tax treatment for this holding. Nil\nmeans \"derive from the asset type\" (see ResolveStateExempt); a non-nil\nvalue is an explicit user choice - e.g. a treasury-only ETF like TLT\nflagged exempt even though ETFs aren't exempt by default.",
+                    "type": "boolean"
                 },
                 "status": {
                     "type": "string"
@@ -1679,6 +1690,9 @@ const docTemplate = `{
                 },
                 "purchase_quantity": {
                     "type": "number"
+                },
+                "state_tax_exempt": {
+                    "type": "boolean"
                 },
                 "status": {
                     "type": "string"
