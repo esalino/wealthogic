@@ -1477,6 +1477,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "category": {
+                    "description": "Category is the kind of income realized: IncomeTypeCapitalGain or\nIncomeTypeInterest. Derived from the disposed asset's tax class, so it\nstays correct when that class is corrected.",
                     "type": "string"
                 },
                 "cost_basis": {
@@ -1532,6 +1533,9 @@ const docTemplate = `{
         "GainSummary": {
             "type": "object",
             "properties": {
+                "interest": {
+                    "type": "number"
+                },
                 "long_term": {
                     "type": "number"
                 },

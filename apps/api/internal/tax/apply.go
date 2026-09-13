@@ -106,8 +106,8 @@ func (a *Applier) contextFor(accountID uuid.UUID) (Context, error) {
 	}, nil
 }
 
-// ApplyToGain writes the per-jurisdiction treatments for one realized capital
-// gain. holding is the disposed security, or nil when it isn't tracked.
+// ApplyToGain writes the per-jurisdiction treatments for one realized disposal.
+// holding is the disposed security, or nil when it isn't tracked.
 func (a *Applier) ApplyToGain(g *models.Gain, holding *models.Holding) error {
 	assetClass := models.TaxClassOther
 	issuer := ""
@@ -116,18 +116,49 @@ func (a *Applier) ApplyToGain(g *models.Gain, holding *models.Holding) error {
 		issuer = holding.ResolveIssuerJurisdiction()
 	}
 
+	// The category says what the disposal realized - a capital gain for most
+	// assets, interest for a discount instrument redeemed at par - so the rules
+	// see a Treasury redemption as the interest it is.
+	incomeType := g.Category
+	if incomeType == "" {
+		incomeType = models.IncomeTypeCapitalGain
+	}
+
+	// Holding period has no bearing on interest, and leaving it set would let a
+	// term-matching rule catch income it was never meant to.
+	term := g.Term
+	if incomeType != models.IncomeTypeCapitalGain {
+		term = ""
+	}
+
 	return a.apply(Event{
 		SourceType:         models.TaxSourceGain,
 		SourceID:           g.ID,
-		IncomeType:         models.IncomeTypeCapitalGain,
+		IncomeType:         incomeType,
 		Amount:             g.Amount,
-		Term:               g.Term,
+		Term:               term,
 		AssetTaxClass:      assetClass,
 		IssuerJurisdiction: issuer,
 		TaxYear:            g.RealizedDate.Year(),
 		AccountID:          g.AccountID,
 		HoldingID:          g.HoldingID,
 	})
+}
+
+// reclassifyGain corrects a gain's category to match its holding's current tax
+// class. The category is derived, so correcting a holding's class has to reach
+// the events already realized from it - otherwise a mis-set class stays baked
+// into the ledger forever.
+func reclassifyGain(tx *gorm.DB, g *models.Gain, holding *models.Holding) error {
+	if holding == nil {
+		return nil
+	}
+	want := models.DisposalIncomeType(holding.ResolveTaxClass())
+	if g.Category == want {
+		return nil
+	}
+	g.Category = want
+	return tx.Model(g).Update("category", want).Error
 }
 
 // ApplyToDistribution writes the per-jurisdiction treatments for one income
@@ -199,6 +230,11 @@ func RecomputeHolding(tx *gorm.DB, holdingID uuid.UUID) error {
 		return err
 	}
 	for i := range gains {
+		// The holding's tax class may have just changed, which can change what
+		// its disposals realized, not only how it's taxed.
+		if err := reclassifyGain(tx, &gains[i], &holding); err != nil {
+			return err
+		}
 		if err := applier.ApplyToGain(&gains[i], &holding); err != nil {
 			return err
 		}
@@ -260,7 +296,11 @@ func RecomputeAll(tx *gorm.DB) error {
 		return err
 	}
 	for i := range gains {
-		if err := applier.ApplyToGain(&gains[i], resolve(gains[i].HoldingID, gains[i].Symbol)); err != nil {
+		holding := resolve(gains[i].HoldingID, gains[i].Symbol)
+		if err := reclassifyGain(tx, &gains[i], holding); err != nil {
+			return err
+		}
+		if err := applier.ApplyToGain(&gains[i], holding); err != nil {
 			return err
 		}
 	}

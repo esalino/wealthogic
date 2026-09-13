@@ -444,13 +444,17 @@ func rebuildHolding(tx *gorm.DB, holdingID uuid.UUID, strict bool) error {
 		return err
 	}
 
-	// Clear this holding's capital-gain ledger and the tax treatments derived
-	// from it; the replay recreates both. Keyed by holding_id, so it also drops
-	// rows from sells that were soft-deleted.
+	// Clear this holding's realized ledger and the tax treatments derived from
+	// it; the replay recreates both. Keyed by holding_id, so it also drops rows
+	// from sells that were soft-deleted.
+	//
+	// Every category goes, not just capital gains: a disposal's category follows
+	// the asset's tax class, so leaving other categories behind would duplicate
+	// them on each rebuild.
 	if err := tax.DeleteForHolding(tx, holdingID); err != nil {
 		return err
 	}
-	if err := tx.Where("holding_id = ? AND category = ?", holdingID, "capital_gain").Delete(&models.Gain{}).Error; err != nil {
+	if err := tx.Where("holding_id = ?", holdingID).Delete(&models.Gain{}).Error; err != nil {
 		return err
 	}
 

@@ -312,3 +312,47 @@ func TestRuleSetOrdersByPriority(t *testing.T) {
 		t.Errorf("last California rule should be the catch-all, got %q", rules[len(rules)-1].Reason)
 	}
 }
+
+// Disposing of a Treasury realizes accreted discount, which is interest - so it
+// must be evaluated as interest, not as the capital gain the import's "sell"
+// makes it look like. Federally that's ordinary income; California can't tax it.
+func TestTreasuryDisposalIsInterest(t *testing.T) {
+	if got := models.DisposalIncomeType(models.TaxClassGovernmentBond); got != models.IncomeTypeInterest {
+		t.Fatalf("government bond disposal = %q, want interest", got)
+	}
+	for _, class := range []string{models.TaxClassEquity, models.TaxClassMoneyMarket, models.TaxClassCorporateBond, models.TaxClassOther} {
+		if got := models.DisposalIncomeType(class); got != models.IncomeTypeCapitalGain {
+			t.Errorf("%s disposal = %q, want capital_gain", class, got)
+		}
+	}
+
+	// The same disposal, evaluated the old way and the new way. The old
+	// classification taxed it in California; the new one doesn't.
+	ev := Event{
+		Amount:             1021.15,
+		AssetTaxClass:      models.TaxClassGovernmentBond,
+		IssuerJurisdiction: models.JurisdictionUS,
+	}
+	ctx := testContext(models.AccountTaxTypePersonal)
+
+	asCapital := ev
+	asCapital.IncomeType = models.IncomeTypeCapitalGain
+	asCapital.Term = "short"
+	if got := outcomes(Evaluate(asCapital, ctx))[models.JurisdictionUSCA]; !got.taxable {
+		t.Fatal("precondition: as a capital gain California would tax it")
+	}
+
+	asInterest := ev
+	asInterest.IncomeType = models.IncomeTypeInterest
+	got := outcomes(Evaluate(asInterest, ctx))
+
+	want := map[string]outcome{
+		models.JurisdictionUS:   {taxable: true, character: models.CharacterOrdinary, amount: 1021.15},
+		models.JurisdictionUSCA: {taxable: false, character: models.CharacterExempt, amount: 1021.15},
+	}
+	for code, w := range want {
+		if got[code] != w {
+			t.Errorf("%s: got %+v, want %+v", code, got[code], w)
+		}
+	}
+}

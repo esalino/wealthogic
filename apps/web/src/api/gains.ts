@@ -12,6 +12,8 @@ export interface TaxTreatment {
 
 export interface Gain {
   id: string
+  // What the disposal realized: 'capital_gain', or 'interest' for a discount
+  // instrument like a Treasury redeemed at par.
   category: string
   holding_id: string | null
   account_id: string
@@ -34,8 +36,11 @@ export interface Gain {
 
 export interface GainSummary {
   total: number
+  // Term splits cover capital gains only - holding period has no bearing on
+  // interest, so a Treasury redemption is counted in `interest` instead.
   short_term: number
   long_term: number
+  interest: number
 }
 
 export interface PaginatedGains {

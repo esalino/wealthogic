@@ -7,6 +7,7 @@ import (
 
 	"github.com/eriksalino/wealthogic/api/internal/models"
 	"github.com/eriksalino/wealthogic/api/internal/tax"
+	"github.com/google/uuid"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
@@ -51,7 +52,59 @@ func Connect() (*gorm.DB, error) {
 		return nil, err
 	}
 
+	if err := reclassifyDisposals(db); err != nil {
+		return nil, err
+	}
+
 	return db, nil
+}
+
+// reclassifyDisposals corrects Gain rows whose category disagrees with what
+// their holding's tax class says the disposal realized - the case being a
+// Treasury redemption, imported as a sell and so recorded as a capital gain when
+// the money is really accreted discount, i.e. interest.
+//
+// The check is a comparison rather than a one-shot migration because the
+// category is derived: it repairs old rows once and stays a cheap no-op after,
+// while also catching drift if a holding's class is corrected outside the normal
+// recompute path.
+func reclassifyDisposals(db *gorm.DB) error {
+	var holdings []models.Holding
+	if err := db.Find(&holdings).Error; err != nil {
+		return err
+	}
+
+	// Group holdings by the category their disposals should carry, so the check
+	// is one query per category rather than one per holding.
+	wantByCategory := map[string][]uuid.UUID{}
+	for _, h := range holdings {
+		want := models.DisposalIncomeType(h.ResolveTaxClass())
+		wantByCategory[want] = append(wantByCategory[want], h.ID)
+	}
+
+	var mismatched int64
+	for want, ids := range wantByCategory {
+		var count int64
+		if err := db.Model(&models.Gain{}).
+			Where("holding_id IN ? AND category <> ?", ids, want).
+			Count(&count).Error; err != nil {
+			return err
+		}
+		mismatched += count
+	}
+	if mismatched == 0 {
+		return nil
+	}
+
+	// RecomputeAll reclassifies each gain and rewrites its treatments, so the
+	// correction and the tax consequences of it land together.
+	if err := db.Transaction(tax.RecomputeAll); err != nil {
+		return err
+	}
+
+	log.Printf("tax migration: reclassified %d realized disposal(s) to match their asset's tax class "+
+		"(e.g. Treasury redemptions from capital gain to interest) and rebuilt their tax treatments", mismatched)
+	return nil
 }
 
 // migrateStateTaxExempt converts the retired per-holding state_tax_exempt flag

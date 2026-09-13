@@ -199,6 +199,10 @@ definitions:
       asset_type:
         type: string
       category:
+        description: |-
+          Category is the kind of income realized: IncomeTypeCapitalGain or
+          IncomeTypeInterest. Derived from the disposed asset's tax class, so it
+          stays correct when that class is corrected.
         type: string
       cost_basis:
         description: includes the lot's commission and fees
@@ -243,6 +247,8 @@ definitions:
     type: object
   GainSummary:
     properties:
+      interest:
+        type: number
       long_term:
         type: number
       short_term:

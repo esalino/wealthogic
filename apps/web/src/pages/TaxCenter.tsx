@@ -104,6 +104,13 @@ function TreatmentBadge({ treatment }: { treatment: TaxTreatment }) {
   )
 }
 
+// What a realized row actually is. Not every disposal is a capital gain:
+// redeeming a Treasury realizes accreted discount, which is interest.
+const CATEGORY_LABEL: Record<string, string> = {
+  capital_gain: 'Capital gain',
+  interest: 'Interest',
+}
+
 // Short forms so a row of badges stays readable; an unmapped character falls
 // back to its raw value rather than being hidden.
 const CHARACTER_SHORT: Record<string, string> = {
@@ -217,18 +224,18 @@ export default function TaxCenter() {
       {/* Realized gains table */}
       <div className="bg-surface-container-lowest rounded-xl shadow-card">
         <div className="px-6 py-4 border-b border-outline-variant">
-          <h2 className="text-headline-sm text-on-surface">Realized Gains &amp; Losses</h2>
+          <h2 className="text-headline-sm text-on-surface">Realized Income &amp; Gains</h2>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full">
             <thead>
               <tr className="border-b border-outline-variant">
                 <th className="text-left px-6 py-3 text-label-caps text-on-surface-variant uppercase">Asset</th>
-                <th className="text-left px-6 py-3 text-label-caps text-on-surface-variant uppercase">Type</th>
+                <th className="text-left px-6 py-3 text-label-caps text-on-surface-variant uppercase">Kind</th>
                 <th className="text-left px-6 py-3 text-label-caps text-on-surface-variant uppercase">Realized Date</th>
-                <th className="text-left px-6 py-3 text-label-caps text-on-surface-variant uppercase">Holding Period</th>
+                <th className="text-left px-6 py-3 text-label-caps text-on-surface-variant uppercase">Held</th>
                 <th className="text-left px-6 py-3 text-label-caps text-on-surface-variant uppercase">Tax Treatment</th>
-                <th className="text-right px-6 py-3 text-label-caps text-on-surface-variant uppercase">Capital Gain/Loss</th>
+                <th className="text-right px-6 py-3 text-label-caps text-on-surface-variant uppercase">Realized</th>
               </tr>
             </thead>
             <tbody>
@@ -239,22 +246,32 @@ export default function TaxCenter() {
                 <tr><td colSpan={6} className="px-6 py-10 text-center text-body-md text-error">Failed to load gains.</td></tr>
               )}
               {!isLoading && !isError && rows.length === 0 && (
-                <tr><td colSpan={6} className="px-6 py-10 text-center text-body-md text-on-surface-variant">No realized gains in {year}.</td></tr>
+                <tr><td colSpan={6} className="px-6 py-10 text-center text-body-md text-on-surface-variant">No realized income or gains in {year}.</td></tr>
               )}
               {rows.map((g) => {
+                // Holding period only characterizes a capital gain - a Treasury's
+                // accreted discount is interest however long it was held.
+                const isCapital = g.category === 'capital_gain'
                 const long = g.term === 'long'
                 return (
                   <tr key={g.id} className="border-b border-outline-variant last:border-0 hover:bg-surface-container-low transition-colors">
                     <td className="px-6 py-4 text-body-md font-medium text-on-surface">{g.symbol || '—'}</td>
                     <td className="px-6 py-4">
-                      <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-surface-container-high text-on-surface-variant text-label-sm font-semibold">{g.asset_type || '—'}</span>
+                      <div className="flex items-center gap-2">
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-surface-container-high text-on-surface-variant text-label-sm font-semibold">
+                          {CATEGORY_LABEL[g.category] ?? g.category}
+                        </span>
+                        <span className="text-label-sm text-on-surface-variant">{g.asset_type || '—'}</span>
+                      </div>
                     </td>
                     <td className="px-6 py-4 text-body-md text-on-surface-variant tabular-nums whitespace-nowrap">{fmtDate(g.realized_date)}</td>
                     <td className="px-6 py-4">
                       <div className="flex items-center gap-2">
-                        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-label-sm font-semibold ${long ? 'bg-secondary-container text-on-secondary-container' : 'bg-surface-container-high text-on-surface-variant'}`}>
-                          {long ? 'Long-term' : 'Short-term'}
-                        </span>
+                        {isCapital && (
+                          <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-label-sm font-semibold ${long ? 'bg-secondary-container text-on-secondary-container' : 'bg-surface-container-high text-on-surface-variant'}`}>
+                            {long ? 'Long-term' : 'Short-term'}
+                          </span>
+                        )}
                         <span className="text-label-sm text-on-surface-variant tabular-nums">{heldLabel(g.acquired_date, g.realized_date)}</span>
                       </div>
                     </td>

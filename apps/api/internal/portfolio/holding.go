@@ -102,7 +102,10 @@ func DepleteLots(tx *gorm.DB, sell *models.Transaction, costBasisMethod string, 
 		}
 
 		g := models.Gain{
-			Category:         "capital_gain",
+			// A disposal doesn't always realize a capital gain - redeeming a
+			// discount instrument realizes interest - so the asset's tax class
+			// decides, not the action that disposed of it.
+			Category:         models.DisposalIncomeType(holding.ResolveTaxClass()),
 			HoldingID:        sell.HoldingID,
 			AccountID:        sell.AccountID,
 			Symbol:           holding.Symbol,
@@ -170,9 +173,12 @@ func RecalcHolding(tx *gorm.DB, holding *models.Holding) error {
 		holding.GainUnrealizedPercent = 0
 	}
 
-	// Realized gains come straight from the Gain ledger for this holding.
+	// Realized amounts come straight from the Gain ledger for this holding, every
+	// category of it: a Treasury's return is realized as interest rather than a
+	// capital gain, and filtering to capital gains would report it as having
+	// earned nothing.
 	var gains []models.Gain
-	if err := tx.Where("holding_id = ? AND category = ?", holding.ID, "capital_gain").Find(&gains).Error; err != nil {
+	if err := tx.Where("holding_id = ?", holding.ID).Find(&gains).Error; err != nil {
 		return err
 	}
 	var realizedAmount, realizedCostBasis float64

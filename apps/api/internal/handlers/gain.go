@@ -22,12 +22,15 @@ func NewGainHandler(db *gorm.DB) GainHandler {
 	return &gainHandler{db: db}
 }
 
-// gainSummary totals a year's realized gains, split by holding period. Used for
-// the Tax Center summary tiles (independent of pagination).
+// gainSummary totals a year's realized amounts (independent of pagination).
+// The long/short split covers capital gains only - holding period has no bearing
+// on interest, so folding a Treasury redemption into "short term" would misstate
+// both figures.
 type gainSummary struct {
 	Total     float64 `json:"total"`
 	ShortTerm float64 `json:"short_term"`
 	LongTerm  float64 `json:"long_term"`
+	Interest  float64 `json:"interest"`
 } // @name GainSummary
 
 type paginatedGains struct {
@@ -59,9 +62,13 @@ func (h *gainHandler) GetGains(c *gin.Context) {
 		pageSize = 20
 	}
 
-	// Capital gains only for now; optional tax-year filter on the realized date.
+	// Every realized disposal, not just capital gains: redeeming a Treasury
+	// realizes interest, and filtering it out here would hide it from the only
+	// page that lists what was realized. Callers wanting one kind pass category.
 	filter := func(q *gorm.DB) *gorm.DB {
-		q = q.Where("category = ?", "capital_gain")
+		if cat := c.Query("category"); cat != "" {
+			q = q.Where("category = ?", cat)
+		}
 		if y := c.Query("year"); y != "" {
 			if year, err := strconv.Atoi(y); err == nil {
 				q = q.Where("EXTRACT(YEAR FROM realized_date) = ?", year)
@@ -76,12 +83,14 @@ func (h *gainHandler) GetGains(c *gin.Context) {
 		return
 	}
 
-	// Year totals across all matching rows (not just the page).
+	// Year totals across all matching rows (not just the page). The term splits
+	// are scoped to capital gains so an interest row can't land in either.
 	var summary gainSummary
 	if err := filter(h.db.Model(&models.Gain{})).
 		Select("COALESCE(SUM(amount), 0) AS total, " +
-			"COALESCE(SUM(amount) FILTER (WHERE term = 'short'), 0) AS short_term, " +
-			"COALESCE(SUM(amount) FILTER (WHERE term = 'long'), 0) AS long_term").
+			"COALESCE(SUM(amount) FILTER (WHERE category = 'capital_gain' AND term = 'short'), 0) AS short_term, " +
+			"COALESCE(SUM(amount) FILTER (WHERE category = 'capital_gain' AND term = 'long'), 0) AS long_term, " +
+			"COALESCE(SUM(amount) FILTER (WHERE category = 'interest'), 0) AS interest").
 		Scan(&summary).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to summarize gains"})
 		return
