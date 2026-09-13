@@ -61,15 +61,22 @@ definitions:
         type: string
       dividend_income:
         type: number
+      issuer_jurisdiction:
+        type: string
       last_price:
         type: number
       purchase_quantity:
         type: number
-      state_tax_exempt:
-        type: boolean
       status:
         type: string
       symbol:
+        type: string
+      tax_class_override:
+        description: |-
+          TaxClassOverride and IssuerJurisdiction describe the asset's tax
+          attributes; nil means "derive from the asset type". They replace the old
+          state_tax_exempt flag - what a holding pays and who issued it are facts
+          about the asset, while whether that's exempt is a jurisdiction's rule.
         type: string
     required:
     - asset_type
@@ -177,10 +184,6 @@ definitions:
     type: object
   DistributionSummary:
     properties:
-      dividend:
-        type: number
-      other_income:
-        type: number
       total:
         type: number
     type: object
@@ -226,6 +229,15 @@ definitions:
           TransactionID is the realizing transaction (the sell). LotTransactionID is
           the buy that supplied the disposed shares (capital gains only).
         type: string
+      treatments:
+        description: |-
+          Treatments is how each jurisdiction taxes this gain, recorded when it was
+          realized. The link is by (source_type, source_id) so one treatment table
+          can serve both this ledger and Distribution, which means it isn't a GORM
+          association - handlers that need it load it explicitly.
+        items:
+          $ref: '#/definitions/TaxTreatment'
+        type: array
       updated_at:
         type: string
     type: object
@@ -264,28 +276,54 @@ definitions:
         type: number
       id:
         type: string
+      issuer_jurisdiction:
+        description: |-
+          IssuerJurisdiction is the government that issued this asset's debt, for
+          the bond classes. It's what the tax rules compare against a jurisdiction
+          to decide questions like "did my own state issue this?" - nil means the
+          asset-type default (see defaultIssuerJurisdiction).
+        type: string
       last_price:
         type: number
       purchase_quantity:
         type: number
-      state_exempt:
-        description: |-
-          StateExempt is the resolved treatment (override, else the asset-type
-          default), computed for responses via AfterFind and never persisted.
-        type: boolean
-      state_tax_exempt:
-        description: |-
-          StateTaxExempt overrides the state-tax treatment for this holding. Nil
-          means "derive from the asset type" (see ResolveStateExempt); a non-nil
-          value is an explicit user choice - e.g. a treasury-only ETF like TLT
-          flagged exempt even though ETFs aren't exempt by default.
-        type: boolean
       status:
         type: string
       symbol:
         type: string
+      tax_class:
+        description: |-
+          TaxClass is the resolved class (override, else the asset-type default),
+          computed for responses via AfterFind and never persisted.
+        type: string
+      tax_class_override:
+        description: |-
+          TaxClassOverride overrides the tax class implied by the asset type. Nil
+          means "derive from the asset type" (see ResolveTaxClass); a non-nil value
+          is an explicit user choice - e.g. a treasury-only ETF like TLT classed as
+          government_bond even though ETFs are equity by default.
+        type: string
       updated_at:
         type: string
+    type: object
+  JurisdictionSummary:
+    properties:
+      buckets:
+        items:
+          $ref: '#/definitions/TaxBucket'
+        type: array
+      code:
+        type: string
+      excluded:
+        items:
+          $ref: '#/definitions/TaxExclusion'
+        type: array
+      level:
+        type: string
+      name:
+        type: string
+      taxable_total:
+        type: number
     type: object
   PaginatedAccounts:
     properties:
@@ -395,6 +433,45 @@ definitions:
       total:
         type: integer
     type: object
+  TaxBucket:
+    properties:
+      amount:
+        type: number
+      character:
+        type: string
+      label:
+        type: string
+    type: object
+  TaxExclusion:
+    properties:
+      amount:
+        type: number
+      label:
+        type: string
+      reason:
+        type: string
+    type: object
+  TaxJurisdiction:
+    properties:
+      code:
+        type: string
+      created_at:
+        type: string
+      currency_code:
+        type: string
+      level:
+        description: national | regional
+        type: string
+      name:
+        type: string
+      parent_code:
+        description: |-
+          ParentCode is the jurisdiction this one sits inside, nil for a national
+          jurisdiction.
+        type: string
+      updated_at:
+        type: string
+    type: object
   TaxLot:
     properties:
       account_id:
@@ -428,6 +505,143 @@ definitions:
         $ref: '#/definitions/TaxLot'
       transaction:
         $ref: '#/definitions/Transaction'
+    type: object
+  TaxProfile:
+    properties:
+      country_code:
+        description: |-
+          CountryCode is the national jurisdiction's code; RegionCode the regional
+          one, nil where the country has no regional income tax or the person isn't
+          subject to one.
+        type: string
+      created_at:
+        type: string
+      effective_from:
+        description: |-
+          EffectiveFrom is when this residency started. Only the current profile is
+          consulted today; storing the date means a residency history can be added
+          later without a migration.
+        type: string
+      id:
+        type: string
+      region_code:
+        type: string
+      updated_at:
+        type: string
+      user_id:
+        type: string
+    type: object
+  TaxProfileRequest:
+    properties:
+      country_code:
+        type: string
+      region_code:
+        type: string
+      user_id:
+        type: string
+    required:
+    - country_code
+    - user_id
+    type: object
+  TaxRule:
+    properties:
+      asset_tax_class:
+        type: string
+      character:
+        description: |-
+          Stored as tax_character: "character" is a type name in Postgres and can't
+          be used unquoted as a column.
+        type: string
+      created_at:
+        type: string
+      id:
+        type: string
+      income_type:
+        description: Match columns. Empty string = matches anything.
+        type: string
+      issuer_scope:
+        description: see IssuerScope* above
+        type: string
+      jurisdiction_code:
+        type: string
+      note:
+        type: string
+      priority:
+        description: |-
+          Priority orders the match; highest wins. Reason is the machine-readable
+          label carried onto the resulting treatment so the UI can explain an
+          exclusion ("Excluded - U.S. Treasury interest").
+        type: integer
+      reason:
+        type: string
+      term:
+        description: short | long, capital gains only
+        type: string
+      treatment:
+        description: Outcome.
+        type: string
+      updated_at:
+        type: string
+    type: object
+  TaxSummary:
+    properties:
+      jurisdictions:
+        items:
+          $ref: '#/definitions/JurisdictionSummary'
+        type: array
+      year:
+        type: integer
+    type: object
+  TaxTreatment:
+    properties:
+      account_id:
+        type: string
+      character:
+        description: |-
+          Stored as tax_character: "character" is a type name in Postgres and can't
+          be used unquoted as a column.
+        type: string
+      created_at:
+        type: string
+      excluded_amount:
+        type: number
+      holding_id:
+        type: string
+      id:
+        type: string
+      jurisdiction_code:
+        type: string
+      reason:
+        type: string
+      rule_id:
+        description: |-
+          RuleID is the rule that decided this, nil when no rule was consulted (a
+          sheltered account) or none matched. Reason is its machine-readable label.
+        type: string
+      source_id:
+        type: string
+      source_type:
+        description: |-
+          The realized event this treatment applies to. SourceType distinguishes the
+          two ledgers (capital gains vs. income) rather than splitting this into two
+          near-identical tables.
+        type: string
+      tax_year:
+        description: |-
+          TaxYear and AccountID are denormalized from the source row so a year's
+          per-jurisdiction summary is a single grouped query with no joins.
+        type: integer
+      taxable:
+        type: boolean
+      taxable_amount:
+        description: |-
+          TaxableAmount and ExcludedAmount split the source amount by this
+          jurisdiction's treatment; exactly one is non-zero. Keeping the excluded
+          side rather than dropping it is what lets the UI show what was left out
+          ("Excluded - U.S. Treasury interest") instead of a silently smaller total.
+        type: number
+      updated_at:
+        type: string
     type: object
   Transaction:
     properties:
@@ -491,15 +705,17 @@ definitions:
         type: string
       dividend_income:
         type: number
+      issuer_jurisdiction:
+        type: string
       last_price:
         type: number
       purchase_quantity:
         type: number
-      state_tax_exempt:
-        type: boolean
       status:
         type: string
       symbol:
+        type: string
+      tax_class_override:
         type: string
     type: object
   UpdateTaxLotRequest:
@@ -986,6 +1202,146 @@ paths:
       summary: Update a tax lot
       tags:
       - tax-lots
+  /tax/jurisdictions:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/TaxJurisdiction'
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: List the tax jurisdictions the app knows about
+      tags:
+      - tax
+  /tax/profiles:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/TaxProfile'
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: List tax residency profiles
+      tags:
+      - tax
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: Tax profile payload
+        in: body
+        name: profile
+        required: true
+        schema:
+          $ref: '#/definitions/TaxProfileRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/TaxProfile'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Set a user's tax residency
+      tags:
+      - tax
+  /tax/recompute:
+    post:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Re-evaluate every stored tax treatment against the current rules
+      tags:
+      - tax
+  /tax/rules:
+    get:
+      parameters:
+      - description: Filter to one jurisdiction code (e.g. US-CA)
+        in: query
+        name: jurisdiction
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/TaxRule'
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: List tax rules, optionally for one jurisdiction
+      tags:
+      - tax
+  /tax/summary:
+    get:
+      parameters:
+      - description: Tax year (defaults to the current year)
+        in: query
+        name: year
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/TaxSummary'
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Taxable income for a year, broken down per jurisdiction
+      tags:
+      - tax
   /transactions:
     get:
       parameters:

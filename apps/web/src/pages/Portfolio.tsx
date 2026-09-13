@@ -12,6 +12,7 @@ import {
 import { createTaxLot, getTaxLots, updateTaxLot } from '../api/taxLots'
 import { createTransaction, deleteTransaction, getTransactions, updateTransaction, type Transaction as ApiTransaction } from '../api/transactions'
 import { getDistributions } from '../api/distributions'
+import { getJurisdictions } from '../api/tax'
 import { getAccounts } from '../api/accounts'
 
 type ChangeDirection = 'positive' | 'negative' | 'neutral'
@@ -341,7 +342,22 @@ const ASSET_TYPES = ['Stock', 'ETF', 'Mutual Fund', 'Bond', 'Money Market', 'Cry
 
 // ── Shared holding form ───────────────────────────────────────────────────────
 
-type StateTaxChoice = 'auto' | 'exempt' | 'taxable'
+// Tax classes describe what an asset pays, not how it's taxed - the
+// jurisdiction rules decide that from this plus the issuer. 'auto' derives the
+// class from the asset type.
+const TAX_CLASSES = [
+  { value: 'auto', label: 'Auto' },
+  { value: 'equity', label: 'Equity' },
+  { value: 'government_bond', label: 'Government bond (e.g. U.S. Treasury)' },
+  { value: 'municipal_bond', label: 'Municipal bond' },
+  { value: 'corporate_bond', label: 'Corporate bond' },
+  { value: 'money_market', label: 'Money market' },
+  { value: 'other', label: 'Other' },
+] as const
+
+// Only the bond classes have an issuing government for the rules to compare
+// against a jurisdiction.
+const ISSUER_CLASSES = new Set(['government_bond', 'municipal_bond'])
 
 interface HoldingFields {
   assetType: string
@@ -351,7 +367,8 @@ interface HoldingFields {
   lastPrice: string
   avgCostBasis: string
   dividendIncome: string
-  stateTax: StateTaxChoice
+  taxClass: string // 'auto' or a tax class
+  issuerJurisdiction: string // '' = none
 }
 
 const emptyHoldingFields: HoldingFields = {
@@ -362,26 +379,30 @@ const emptyHoldingFields: HoldingFields = {
   lastPrice: '',
   avgCostBasis: '',
   dividendIncome: '',
-  stateTax: 'auto',
+  taxClass: 'auto',
+  issuerJurisdiction: '',
 }
 
-// The state-tax override maps to a nullable bool: auto = derive from asset type.
-function stateTaxToOverride(choice: StateTaxChoice): boolean | null {
-  if (choice === 'exempt') return true
-  if (choice === 'taxable') return false
-  return null
+// Mirror of the backend's asset-type default, only to label what "Auto"
+// resolves to. The backend stays the source of truth for the classification.
+function defaultTaxClass(assetType: string): string {
+  switch (assetType) {
+    case 'Treasury':
+      return 'government_bond'
+    case 'Money Market':
+      return 'money_market'
+    case 'Stock':
+    case 'ETF':
+    case 'Mutual Fund':
+      return 'equity'
+    case 'Bond':
+      return 'corporate_bond'
+  }
+  return 'other'
 }
 
-function overrideToStateTax(override: boolean | null): StateTaxChoice {
-  if (override === true) return 'exempt'
-  if (override === false) return 'taxable'
-  return 'auto'
-}
-
-// Mirror of the backend's asset-type default, only to label what "Auto" resolves
-// to. The backend stays the source of truth for the actual classification.
-function defaultStateExempt(assetType: string): boolean {
-  return assetType === 'Treasury'
+function taxClassLabel(value: string): string {
+  return TAX_CLASSES.find((c) => c.value === value)?.label ?? value
 }
 
 function fieldsFromHolding(h: ApiHolding): HoldingFields {
@@ -393,7 +414,8 @@ function fieldsFromHolding(h: ApiHolding): HoldingFields {
     lastPrice: String(h.last_price ?? ''),
     avgCostBasis: String(h.average_cost_basis ?? ''),
     dividendIncome: String(h.dividend_income ?? ''),
-    stateTax: overrideToStateTax(h.state_tax_exempt ?? null),
+    taxClass: h.tax_class_override ?? 'auto',
+    issuerJurisdiction: h.issuer_jurisdiction ?? '',
   }
 }
 
@@ -413,8 +435,19 @@ function fieldsToPayload(f: HoldingFields): CreateHoldingPayload {
     average_cost_basis: avgCost,
     cost_basis_total: avgCost * qty,
     dividend_income: parseFloat(f.dividendIncome) || 0,
-    state_tax_exempt: stateTaxToOverride(f.stateTax),
+    // 'auto' clears the override back to the asset-type default. An issuer is
+    // only meaningful for the bond classes, so it's dropped otherwise rather
+    // than left behind by a class change.
+    tax_class_override: f.taxClass === 'auto' ? null : f.taxClass,
+    issuer_jurisdiction: issuerAppliesTo(f) && f.issuerJurisdiction ? f.issuerJurisdiction : null,
   }
+}
+
+// issuerAppliesTo reports whether the resolved class is one with an issuing
+// government, so the form only asks for an issuer when it means something.
+function issuerAppliesTo(f: HoldingFields): boolean {
+  const resolved = f.taxClass === 'auto' ? defaultTaxClass(f.assetType) : f.taxClass
+  return ISSUER_CLASSES.has(resolved)
 }
 
 const modalInputCls = 'w-full px-3 py-2.5 bg-surface-container-low border border-outline-variant rounded-lg text-body-md text-on-surface placeholder:text-on-surface-variant focus:outline-none focus:ring-2 focus:ring-secondary/30 focus:border-secondary transition-colors'
@@ -514,17 +547,54 @@ function HoldingFormFields({
       </div>
 
       <div>
-        <label className="block text-label-sm font-semibold text-on-surface mb-1.5">State Tax</label>
-        <select value={fields.stateTax} onChange={(e) => set('stateTax', e.target.value as StateTaxChoice)} className={modalInputCls}>
-          <option value="auto">Auto — {defaultStateExempt(fields.assetType) ? 'exempt' : 'taxable'} for {fields.assetType}</option>
-          <option value="exempt">State exempt</option>
-          <option value="taxable">State taxable</option>
+        <label className="block text-label-sm font-semibold text-on-surface mb-1.5">Tax Class</label>
+        <select value={fields.taxClass} onChange={(e) => set('taxClass', e.target.value)} className={modalInputCls}>
+          {TAX_CLASSES.map((c) => (
+            <option key={c.value} value={c.value}>
+              {c.value === 'auto'
+                ? `Auto — ${taxClassLabel(defaultTaxClass(fields.assetType))} for ${fields.assetType}`
+                : c.label}
+            </option>
+          ))}
         </select>
         <p className="mt-1 text-label-sm text-on-surface-variant">
-          Treasuries are exempt by default. Override for a treasury-only fund like TLT.
+          What this asset pays, not how it's taxed — each jurisdiction's rules decide that. Override
+          for a fund that holds something other than its asset type suggests, like a Treasury ETF.
         </p>
       </div>
+
+      {issuerAppliesTo(fields) && (
+        <div>
+          <label className="block text-label-sm font-semibold text-on-surface mb-1.5">Issuing Government</label>
+          <IssuerSelect value={fields.issuerJurisdiction} onChange={(v) => set('issuerJurisdiction', v)} />
+          <p className="mt-1 text-label-sm text-on-surface-variant">
+            Which government issued the debt. This is what decides exemptions — federal debt is
+            exempt from state tax, and a state's own municipal debt is exempt in that state.
+          </p>
+        </div>
+      )}
     </div>
+  )
+}
+
+// IssuerSelect lists the jurisdictions the API knows about, so the set grows
+// with the seeded jurisdictions rather than a hardcoded list here.
+function IssuerSelect({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const { data: jurisdictions } = useQuery({
+    queryKey: ['tax', 'jurisdictions'],
+    queryFn: getJurisdictions,
+    staleTime: Infinity,
+  })
+
+  return (
+    <select value={value} onChange={(e) => onChange(e.target.value)} className={modalInputCls}>
+      <option value="">Not specified</option>
+      {(jurisdictions ?? []).map((j) => (
+        <option key={j.code} value={j.code}>
+          {j.name}
+        </option>
+      ))}
+    </select>
   )
 }
 

@@ -6,6 +6,7 @@ import (
 
 	"github.com/eriksalino/wealthogic/api/internal/models"
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
 
@@ -93,6 +94,11 @@ func (h *gainHandler) GetGains(c *gin.Context) {
 		return
 	}
 
+	if err := attachTreatments(h.db, gains); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch tax treatments"})
+		return
+	}
+
 	c.JSON(http.StatusOK, paginatedGains{
 		Data:     gains,
 		Total:    total,
@@ -100,4 +106,34 @@ func (h *gainHandler) GetGains(c *gin.Context) {
 		PageSize: pageSize,
 		Summary:  summary,
 	})
+}
+
+// attachTreatments loads the per-jurisdiction tax treatments for a page of
+// gains in one query. The treatment table is keyed by (source_type, source_id)
+// so it can serve both ledgers, which rules out a GORM association - hence the
+// explicit join here rather than a Preload.
+func attachTreatments(db *gorm.DB, gains []models.Gain) error {
+	if len(gains) == 0 {
+		return nil
+	}
+
+	ids := make([]uuid.UUID, 0, len(gains))
+	for _, g := range gains {
+		ids = append(ids, g.ID)
+	}
+
+	var treatments []models.TaxTreatment
+	if err := db.Where("source_type = ? AND source_id IN ?", models.TaxSourceGain, ids).
+		Order("jurisdiction_code ASC").Find(&treatments).Error; err != nil {
+		return err
+	}
+
+	bySource := map[uuid.UUID][]models.TaxTreatment{}
+	for _, t := range treatments {
+		bySource[t.SourceID] = append(bySource[t.SourceID], t)
+	}
+	for i := range gains {
+		gains[i].Treatments = bySource[gains[i].ID]
+	}
+	return nil
 }

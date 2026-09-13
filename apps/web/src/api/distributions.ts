@@ -14,10 +14,11 @@ export interface Distribution {
   updated_at: string
 }
 
+// Income totals carry no tax-bucket split: how income divides into qualified,
+// ordinary, and exempt depends on the jurisdiction asking, so that breakdown
+// comes from getTaxSummary instead, per jurisdiction.
 export interface DistributionSummary {
   total: number
-  dividend: number // qualifiable equity dividends
-  other_income: number // money-market/treasury/state-exempt income + interest
 }
 
 export interface PaginatedDistributions {

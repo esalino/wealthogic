@@ -9,6 +9,7 @@ import (
 
 	"github.com/eriksalino/wealthogic/api/internal/models"
 	"github.com/eriksalino/wealthogic/api/internal/portfolio"
+	"github.com/eriksalino/wealthogic/api/internal/tax"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -209,7 +210,11 @@ func (h *transactionHandler) CreateTransaction(c *gin.Context) {
 		// writing a Gain row per lot and recording the realized total. Selling
 		// more than is held is rejected.
 		if isSell {
-			realized, unfilled, err := portfolio.DepleteLots(tx, &txn, account.DefaultCostBasis)
+			applier, err := tax.NewApplier(tx)
+			if err != nil {
+				return err
+			}
+			realized, unfilled, err := portfolio.DepleteLots(tx, &txn, account.DefaultCostBasis, applier)
 			if err != nil {
 				return err
 			}
@@ -439,8 +444,12 @@ func rebuildHolding(tx *gorm.DB, holdingID uuid.UUID, strict bool) error {
 		return err
 	}
 
-	// Clear this holding's capital-gain ledger; the replay recreates it. Keyed
-	// by holding_id, so it also drops rows from sells that were soft-deleted.
+	// Clear this holding's capital-gain ledger and the tax treatments derived
+	// from it; the replay recreates both. Keyed by holding_id, so it also drops
+	// rows from sells that were soft-deleted.
+	if err := tax.DeleteForHolding(tx, holdingID); err != nil {
+		return err
+	}
 	if err := tx.Where("holding_id = ? AND category = ?", holdingID, "capital_gain").Delete(&models.Gain{}).Error; err != nil {
 		return err
 	}
@@ -449,6 +458,13 @@ func rebuildHolding(tx *gorm.DB, holdingID uuid.UUID, strict bool) error {
 	var sells []models.Transaction
 	if err := tx.Where("holding_id = ? AND LOWER(action) = ?", holdingID, "sell").
 		Order("date ASC").Order("id ASC").Find(&sells).Error; err != nil {
+		return err
+	}
+
+	// One applier for the whole replay: every sell is evaluated against the same
+	// rules, so they're loaded once rather than per sell.
+	applier, err := tax.NewApplier(tx)
+	if err != nil {
 		return err
 	}
 
@@ -465,7 +481,7 @@ func rebuildHolding(tx *gorm.DB, holdingID uuid.UUID, strict bool) error {
 				}
 				costBasisMethod[sell.AccountID] = method
 			}
-			r, unfilled, err := portfolio.DepleteLots(tx, sell, method)
+			r, unfilled, err := portfolio.DepleteLots(tx, sell, method, applier)
 			if err != nil {
 				return err
 			}

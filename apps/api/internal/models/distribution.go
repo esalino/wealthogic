@@ -36,21 +36,35 @@ type Distribution struct {
 	TransactionID *uuid.UUID `gorm:"type:uuid;index" json:"transaction_id"`
 } // @name Distribution
 
-// IsQualifiableDividend reports whether a distribution belongs in the "dividend"
-// tax bucket - income that can carry a qualified/unqualified character (equity
-// dividends). Money-market and treasury income, distributions from a state-exempt
-// (treasury-like) holding, and anything already categorized as interest are
-// ordinary "other income" instead. holding is the paying security, or nil when
-// it isn't tracked.
-func IsQualifiableDividend(d Distribution, holding *Holding) bool {
-	if d.Category != "dividend" {
-		return false
+// ResolveTaxClass reports what kind of income this distribution represents, from
+// the paying security's tax class. holding is that security, or nil when it
+// isn't tracked - in which case the asset type recorded on the distribution
+// itself is the best available signal.
+//
+// The qualified-vs-ordinary question this used to answer directly now belongs to
+// the jurisdiction rules, which read this class: a distribution from an equity
+// holding can qualify for a preferential federal rate, while money-market and
+// government-bond income is always ordinary.
+func (d Distribution) ResolveTaxClass(holding *Holding) string {
+	if holding != nil {
+		return holding.ResolveTaxClass()
 	}
-	if d.AssetType != nil && (*d.AssetType == AssetTypeMoneyMarket || *d.AssetType == AssetTypeTreasury) {
-		return false
+	if d.AssetType != nil {
+		return defaultTaxClass(*d.AssetType)
 	}
-	if holding != nil && holding.ResolveStateExempt() {
-		return false
+	return TaxClassOther
+}
+
+// ResolveIssuerJurisdiction reports which government issued the paying security's
+// debt, or "" when there is none or it isn't tracked.
+func (d Distribution) ResolveIssuerJurisdiction(holding *Holding) string {
+	if holding != nil {
+		return holding.ResolveIssuerJurisdiction()
 	}
-	return true
+	if d.AssetType != nil {
+		if code := defaultIssuerJurisdiction(*d.AssetType); code != nil {
+			return *code
+		}
+	}
+	return ""
 }

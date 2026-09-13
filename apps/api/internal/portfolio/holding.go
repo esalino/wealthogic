@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/eriksalino/wealthogic/api/internal/models"
+	"github.com/eriksalino/wealthogic/api/internal/tax"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
@@ -43,11 +44,15 @@ func openLots(tx *gorm.DB, holdingID, accountID uuid.UUID, costBasisMethod strin
 
 // DepleteLots consumes the sell's shares from the holding's open buy lots in the
 // account's cost-basis order, decrementing each lot's remaining_quantity and
-// writing a Gain (capital-gain) row per lot it draws from. It returns the total
-// realized gain and the quantity it could NOT fill (0 when there were enough
-// shares). Callers that must reject an over-sell check the unfilled amount;
-// lenient callers (imports) ignore it.
-func DepleteLots(tx *gorm.DB, sell *models.Transaction, costBasisMethod string) (realized, unfilled float64, err error) {
+// writing a Gain (capital-gain) row per lot it draws from, plus that gain's
+// per-jurisdiction tax treatments. It returns the total realized gain and the
+// quantity it could NOT fill (0 when there were enough shares). Callers that
+// must reject an over-sell check the unfilled amount; lenient callers (imports)
+// ignore it.
+//
+// applier is shared across a batch of sells so the tax rules are loaded once;
+// callers replaying a whole holding pass the same one for every sell.
+func DepleteLots(tx *gorm.DB, sell *models.Transaction, costBasisMethod string, applier *tax.Applier) (realized, unfilled float64, err error) {
 	if sell.HoldingID == nil || sell.Quantity == nil || sell.Price == nil {
 		return 0, 0, nil
 	}
@@ -113,6 +118,12 @@ func DepleteLots(tx *gorm.DB, sell *models.Transaction, costBasisMethod string) 
 			Amount:           gain,
 		}
 		if err := tx.Create(&g).Error; err != nil {
+			return 0, 0, err
+		}
+
+		// The gain is realized now, so its tax treatment is settled now - by the
+		// rules and the holding's tax attributes as they stand at realization.
+		if err := applier.ApplyToGain(&g, &holding); err != nil {
 			return 0, 0, err
 		}
 

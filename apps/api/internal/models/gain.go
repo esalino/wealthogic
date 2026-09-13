@@ -37,4 +37,10 @@ type Gain struct {
 	Term      string  `json:"term"`       // "short" | "long"
 
 	Amount float64 `json:"amount"` // realized gain/loss = proceeds - cost_basis
+
+	// Treatments is how each jurisdiction taxes this gain, recorded when it was
+	// realized. The link is by (source_type, source_id) so one treatment table
+	// can serve both this ledger and Distribution, which means it isn't a GORM
+	// association - handlers that need it load it explicitly.
+	Treatments []TaxTreatment `gorm:"-" json:"treatments,omitempty"`
 } // @name Gain

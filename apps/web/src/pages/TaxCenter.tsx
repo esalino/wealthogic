@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { getGains } from '../api/gains'
-import { getDistributions } from '../api/distributions'
+import { getGains, type TaxTreatment } from '../api/gains'
+import { getTaxSummary, type JurisdictionSummary } from '../api/tax'
 
 const PAGE_SIZES = [10, 20, 50]
 
@@ -34,71 +34,85 @@ function heldLabel(acquired: string, realized: string) {
   return `${d}d`
 }
 
-// A line in a tax bucket. `signed` colors the value like a gain/loss (green/red)
-// and shows an explicit sign; otherwise it's a plain neutral income amount.
-interface BucketRow {
-  label: string
-  value: number
-  sub?: string // small detail under the label (e.g. the long/short split)
-  note?: string // inline qualifier after the label (e.g. "all ordinary")
-  signed?: boolean
-}
+// Characters that represent a capital gain, which can be negative and so read
+// better signed and colored like a gain/loss than as a plain income amount.
+const SIGNED_CHARACTERS = new Set(['long_term_capital', 'short_term_capital'])
 
-// BucketCard renders one jurisdiction (Federal or State): its taxable buckets
-// and the taxable total. Federal and State intentionally differ in shape -
-// Federal breaks gains down by rate character, State collapses them and instead
-// lists what's excluded.
-function BucketCard({
-  title,
-  subtitle,
-  rows,
-  total,
-  excluded,
-}: {
-  title: string
-  subtitle: string
-  rows: BucketRow[]
-  total: number
-  excluded?: { label: string; value: number }
-}) {
+// BucketCard renders one jurisdiction's taxable buckets, its total, and what it
+// excluded. Nothing about the card's shape is fixed: jurisdictions genuinely
+// differ - the U.S. splits capital gains by holding period while California
+// folds everything into ordinary income - so the buckets are whatever the API
+// reports, labels included.
+function BucketCard({ jurisdiction, year }: { jurisdiction: JurisdictionSummary; year: number }) {
   return (
     <div className="bg-surface-container-lowest rounded-xl shadow-card p-6">
       <div className="flex items-start justify-between mb-3">
         <div>
-          <h3 className="text-label-caps text-on-surface-variant uppercase">{title}</h3>
-          <p className="text-label-sm text-on-surface-variant">{subtitle}</p>
+          <h3 className="text-label-caps text-on-surface-variant uppercase">{jurisdiction.name}</h3>
+          <p className="text-label-sm text-on-surface-variant">Taxable income for {year}</p>
         </div>
         <div className="text-right">
           <p className="text-label-caps text-on-surface-variant uppercase">Taxable</p>
-          <p className="text-headline-md font-bold tabular-nums text-on-surface">{fmtCurrency(total)}</p>
+          <p className="text-headline-md font-bold tabular-nums text-on-surface">
+            {fmtCurrency(jurisdiction.taxable_total)}
+          </p>
         </div>
       </div>
       <div className="divide-y divide-outline-variant border-t border-outline-variant">
-        {rows.map((r) => (
-          <div key={r.label} className="flex items-baseline justify-between py-2.5">
-            <div>
-              <p className="text-body-md text-on-surface">
-                {r.label}
-                {r.note && <span className="text-label-sm text-on-surface-variant"> · {r.note}</span>}
+        {jurisdiction.buckets.map((b) => {
+          const signed = SIGNED_CHARACTERS.has(b.character)
+          return (
+            <div key={b.character} className="flex items-baseline justify-between py-2.5">
+              <p className="text-body-md text-on-surface">{b.label}</p>
+              <p className={`text-data-tabular font-semibold tabular-nums ${signed ? gainColor(b.amount) : 'text-on-surface'}`}>
+                {signed ? fmtSigned(b.amount) : fmtCurrency(b.amount)}
               </p>
-              {r.sub && <p className="text-label-sm text-on-surface-variant tabular-nums">{r.sub}</p>}
             </div>
-            <p className={`text-data-tabular font-semibold tabular-nums ${r.signed ? gainColor(r.value) : 'text-on-surface'}`}>
-              {r.signed ? fmtSigned(r.value) : fmtCurrency(r.value)}
+          )
+        })}
+        {jurisdiction.excluded.map((e) => (
+          <div key={e.reason} className="flex items-baseline justify-between py-2.5">
+            <p className="text-body-md text-on-surface-variant">Excluded — {e.label}</p>
+            <p className="text-data-tabular font-semibold tabular-nums text-on-surface-variant">
+              -{fmtCurrency(Math.abs(e.amount))}
             </p>
           </div>
         ))}
-        {excluded && excluded.value !== 0 && (
-          <div className="flex items-baseline justify-between py-2.5">
-            <p className="text-body-md text-on-surface-variant">{excluded.label}</p>
-            <p className="text-data-tabular font-semibold tabular-nums text-on-surface-variant">
-              -{fmtCurrency(Math.abs(excluded.value))}
-            </p>
-          </div>
+        {jurisdiction.buckets.length === 0 && jurisdiction.excluded.length === 0 && (
+          <p className="py-2.5 text-body-md text-on-surface-variant">No taxable activity.</p>
         )}
       </div>
     </div>
   )
+}
+
+// TreatmentBadge shows how one jurisdiction taxes a gain. Two badges on a row
+// that disagree - taxable federally, exempt at the state level - is the point:
+// the same event can land differently in each jurisdiction.
+function TreatmentBadge({ treatment }: { treatment: TaxTreatment }) {
+  const style = treatment.taxable
+    ? 'bg-surface-container-high text-on-surface-variant'
+    : 'bg-secondary-container text-on-secondary-container'
+  return (
+    <span
+      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-label-sm font-semibold ${style}`}
+      title={treatment.reason}
+    >
+      <span className="opacity-70">{treatment.jurisdiction_code}</span>
+      {CHARACTER_SHORT[treatment.character] ?? treatment.character}
+    </span>
+  )
+}
+
+// Short forms so a row of badges stays readable; an unmapped character falls
+// back to its raw value rather than being hidden.
+const CHARACTER_SHORT: Record<string, string> = {
+  long_term_capital: 'Long-term',
+  short_term_capital: 'Short-term',
+  qualified_eligible: 'Qualified',
+  ordinary: 'Ordinary',
+  exempt: 'Exempt',
+  deferred: 'Deferred',
 }
 
 function TablePagination({ page, setPage, total }: { page: Pagination; setPage: (p: Pagination) => void; total: number }) {
@@ -150,24 +164,16 @@ export default function TaxCenter() {
     queryFn: () => getGains(year, page.pageIndex + 1, page.pageSize),
   })
 
-  // Year-scoped income totals for the buckets. Only the summary is needed here,
-  // so ask for the smallest page.
-  const { data: distData } = useQuery({
-    queryKey: ['distributions', 'summary', year],
-    queryFn: () => getDistributions(undefined, year, 1, 1),
+  // Taxable income per jurisdiction, already bucketed and labeled by the API
+  // from the tax treatments stored when each event was realized. The page no
+  // longer decides what's taxable where - the jurisdiction rules do.
+  const { data: taxData, isLoading: taxLoading } = useQuery({
+    queryKey: ['tax', 'summary', year],
+    queryFn: () => getTaxSummary(year),
   })
 
   const rows = data?.data ?? []
-  const gains = data?.summary ?? { total: 0, short_term: 0, long_term: 0 }
-  const income = distData?.summary ?? { total: 0, dividend: 0, other_income: 0 }
-
-  // Buckets over the data we have today. Treasury income is still recorded as a
-  // capital gain (reclassification deferred), so the state-exempt Treasury line
-  // stays dormant at 0 and Federal/State totals match until that lands.
-  const capNet = gains.total
-  const treasuryExempt = 0
-  const fedTaxable = capNet + income.dividend + income.other_income
-  const stateTaxable = fedTaxable - treasuryExempt
+  const jurisdictions = taxData?.jurisdictions ?? []
 
   return (
     <div className="p-8">
@@ -189,34 +195,23 @@ export default function TaxCenter() {
         </div>
       </div>
 
-      {/* Tax buckets, split by jurisdiction */}
+      {/* One card per jurisdiction the income is subject to. The set and the
+          shape of each card come from the API, so adding a jurisdiction's rules
+          adds a card here with no change to this page. */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
-        <BucketCard
-          title="Federal"
-          subtitle={`Taxable income for ${year}`}
-          total={fedTaxable}
-          rows={[
-            {
-              label: 'Capital gains — net',
-              value: capNet,
-              sub: `long ${fmtSigned(gains.long_term)} · short ${fmtSigned(gains.short_term)}`,
-              signed: true,
-            },
-            { label: 'Dividends', value: income.dividend },
-            { label: 'Interest & other income', value: income.other_income },
-          ]}
-        />
-        <BucketCard
-          title="State"
-          subtitle={`Taxable income for ${year}`}
-          total={stateTaxable}
-          rows={[
-            { label: 'Capital gains — net', value: capNet, signed: true },
-            { label: 'Dividends', value: income.dividend, note: 'all ordinary' },
-            { label: 'Interest & other income', value: income.other_income },
-          ]}
-          excluded={{ label: 'Excluded — U.S. Treasury', value: treasuryExempt }}
-        />
+        {taxLoading && (
+          <div className="bg-surface-container-lowest rounded-xl shadow-card p-6 text-body-md text-on-surface-variant">
+            Loading tax summary…
+          </div>
+        )}
+        {!taxLoading && jurisdictions.length === 0 && (
+          <div className="bg-surface-container-lowest rounded-xl shadow-card p-6 text-body-md text-on-surface-variant">
+            No taxable activity in {year}.
+          </div>
+        )}
+        {jurisdictions.map((j) => (
+          <BucketCard key={j.code} jurisdiction={j} year={year} />
+        ))}
       </div>
 
       {/* Realized gains table */}
@@ -232,18 +227,19 @@ export default function TaxCenter() {
                 <th className="text-left px-6 py-3 text-label-caps text-on-surface-variant uppercase">Type</th>
                 <th className="text-left px-6 py-3 text-label-caps text-on-surface-variant uppercase">Realized Date</th>
                 <th className="text-left px-6 py-3 text-label-caps text-on-surface-variant uppercase">Holding Period</th>
+                <th className="text-left px-6 py-3 text-label-caps text-on-surface-variant uppercase">Tax Treatment</th>
                 <th className="text-right px-6 py-3 text-label-caps text-on-surface-variant uppercase">Capital Gain/Loss</th>
               </tr>
             </thead>
             <tbody>
               {isLoading && (
-                <tr><td colSpan={5} className="px-6 py-10 text-center text-body-md text-on-surface-variant">Loading gains…</td></tr>
+                <tr><td colSpan={6} className="px-6 py-10 text-center text-body-md text-on-surface-variant">Loading gains…</td></tr>
               )}
               {isError && (
-                <tr><td colSpan={5} className="px-6 py-10 text-center text-body-md text-error">Failed to load gains.</td></tr>
+                <tr><td colSpan={6} className="px-6 py-10 text-center text-body-md text-error">Failed to load gains.</td></tr>
               )}
               {!isLoading && !isError && rows.length === 0 && (
-                <tr><td colSpan={5} className="px-6 py-10 text-center text-body-md text-on-surface-variant">No realized gains in {year}.</td></tr>
+                <tr><td colSpan={6} className="px-6 py-10 text-center text-body-md text-on-surface-variant">No realized gains in {year}.</td></tr>
               )}
               {rows.map((g) => {
                 const long = g.term === 'long'
@@ -260,6 +256,13 @@ export default function TaxCenter() {
                           {long ? 'Long-term' : 'Short-term'}
                         </span>
                         <span className="text-label-sm text-on-surface-variant tabular-nums">{heldLabel(g.acquired_date, g.realized_date)}</span>
+                      </div>
+                    </td>
+                    <td className="px-6 py-4">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        {(g.treatments ?? []).map((t) => (
+                          <TreatmentBadge key={t.jurisdiction_code} treatment={t} />
+                        ))}
                       </div>
                     </td>
                     <td className={`px-6 py-4 text-right text-data-tabular font-semibold tabular-nums ${gainColor(g.amount)}`}>{fmtSigned(g.amount)}</td>

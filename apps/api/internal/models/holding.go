@@ -15,18 +15,43 @@ const (
 )
 
 // Asset types the tax rules single out. Kept here so the rules and the
-// importer's classification agree on the spelling. Treasury income is exempt
-// from state tax by default; money-market and treasury income is always ordinary
-// (never a qualifiable dividend).
+// importer's classification agree on the spelling.
 const (
 	AssetTypeTreasury    = "Treasury"
 	AssetTypeMoneyMarket = "Money Market"
+	AssetTypeStock       = "Stock"
+	AssetTypeETF         = "ETF"
+	AssetTypeMutualFund  = "Mutual Fund"
+	AssetTypeBond        = "Bond"
 )
 
-// defaultStateExempt is the state-tax treatment implied by an asset type alone:
-// U.S. Treasury income is exempt from state tax; everything else is taxable.
-func defaultStateExempt(assetType string) bool {
-	return assetType == AssetTypeTreasury
+// defaultTaxClass is the tax class implied by an asset type alone. It mirrors
+// the importer's asset-type classification (see uploads.assetTypeFor) so an
+// imported holding lands in the right class without the user touching it.
+func defaultTaxClass(assetType string) string {
+	switch assetType {
+	case AssetTypeTreasury:
+		return TaxClassGovernmentBond
+	case AssetTypeMoneyMarket:
+		return TaxClassMoneyMarket
+	case AssetTypeStock, AssetTypeETF, AssetTypeMutualFund:
+		return TaxClassEquity
+	case AssetTypeBond:
+		return TaxClassCorporateBond
+	}
+	return TaxClassOther
+}
+
+// defaultIssuerJurisdiction is the issuing government implied by an asset type
+// alone. Only government debt has one by default, and only a treasury's issuer
+// is unambiguous from the asset type; a municipal bond's issuing state has to
+// be set on the holding.
+func defaultIssuerJurisdiction(assetType string) *string {
+	if assetType == AssetTypeTreasury {
+		code := JurisdictionUS
+		return &code
+	}
+	return nil
 }
 
 // Holding represents a single holding. A holding can be made up of multiple child tax lots.
@@ -57,28 +82,46 @@ type Holding struct {
 	GainRealizedAmount  float64 `json:"gain_realized_amount"`
 	DividendIncome      float64 `json:"dividend_income"`
 
-	// StateTaxExempt overrides the state-tax treatment for this holding. Nil
-	// means "derive from the asset type" (see ResolveStateExempt); a non-nil
-	// value is an explicit user choice - e.g. a treasury-only ETF like TLT
-	// flagged exempt even though ETFs aren't exempt by default.
-	StateTaxExempt *bool `json:"state_tax_exempt"`
+	// TaxClassOverride overrides the tax class implied by the asset type. Nil
+	// means "derive from the asset type" (see ResolveTaxClass); a non-nil value
+	// is an explicit user choice - e.g. a treasury-only ETF like TLT classed as
+	// government_bond even though ETFs are equity by default.
+	TaxClassOverride *string `gorm:"size:32" json:"tax_class_override"`
 
-	// StateExempt is the resolved treatment (override, else the asset-type
-	// default), computed for responses via AfterFind and never persisted.
-	StateExempt bool `gorm:"-" json:"state_exempt"`
+	// IssuerJurisdiction is the government that issued this asset's debt, for
+	// the bond classes. It's what the tax rules compare against a jurisdiction
+	// to decide questions like "did my own state issue this?" - nil means the
+	// asset-type default (see defaultIssuerJurisdiction).
+	IssuerJurisdiction *string `gorm:"size:16" json:"issuer_jurisdiction"`
+
+	// TaxClass is the resolved class (override, else the asset-type default),
+	// computed for responses via AfterFind and never persisted.
+	TaxClass string `gorm:"-" json:"tax_class"`
 } // @name Holding
 
-// ResolveStateExempt reports whether this holding's income is exempt from state
-// tax: the per-holding override when set, otherwise the asset-type default.
-func (h Holding) ResolveStateExempt() bool {
-	if h.StateTaxExempt != nil {
-		return *h.StateTaxExempt
+// ResolveTaxClass reports what kind of income this holding produces for tax
+// purposes: the per-holding override when set, otherwise the asset-type default.
+func (h Holding) ResolveTaxClass() string {
+	if h.TaxClassOverride != nil && *h.TaxClassOverride != "" {
+		return *h.TaxClassOverride
 	}
-	return defaultStateExempt(h.AssetType)
+	return defaultTaxClass(h.AssetType)
 }
 
-// AfterFind populates the computed StateExempt field whenever a holding is read.
+// ResolveIssuerJurisdiction reports which government issued this holding's debt,
+// or "" when none is recorded (the usual case outside the bond classes).
+func (h Holding) ResolveIssuerJurisdiction() string {
+	if h.IssuerJurisdiction != nil && *h.IssuerJurisdiction != "" {
+		return *h.IssuerJurisdiction
+	}
+	if code := defaultIssuerJurisdiction(h.AssetType); code != nil {
+		return *code
+	}
+	return ""
+}
+
+// AfterFind populates the computed TaxClass field whenever a holding is read.
 func (h *Holding) AfterFind(*gorm.DB) error {
-	h.StateExempt = h.ResolveStateExempt()
+	h.TaxClass = h.ResolveTaxClass()
 	return nil
 }

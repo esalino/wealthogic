@@ -1,5 +1,15 @@
 const API_BASE = import.meta.env.API_URL ?? 'http://localhost:8080'
 
+// How one jurisdiction taxes a realized event, recorded when it was realized.
+export interface TaxTreatment {
+  jurisdiction_code: string
+  taxable: boolean
+  taxable_amount: number
+  excluded_amount: number
+  character: string
+  reason: string
+}
+
 export interface Gain {
   id: string
   category: string
@@ -16,6 +26,8 @@ export interface Gain {
   proceeds: number
   term: string // 'short' | 'long'
   amount: number
+  // Per-jurisdiction treatment of this gain.
+  treatments?: TaxTreatment[]
   created_at: string
   updated_at: string
 }

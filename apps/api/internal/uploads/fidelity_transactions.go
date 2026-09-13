@@ -10,6 +10,7 @@ import (
 
 	"github.com/eriksalino/wealthogic/api/internal/models"
 	"github.com/eriksalino/wealthogic/api/internal/portfolio"
+	"github.com/eriksalino/wealthogic/api/internal/tax"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
@@ -214,6 +215,13 @@ func (h *fidelityTransactionsHandler) Process(db *gorm.DB, file io.Reader, opts 
 		// Holdings that got new lots and need their aggregates recomputed.
 		affected := map[uuid.UUID]bool{}
 
+		// One applier for the whole file: every realized event in it is
+		// evaluated against the same rules, so they're loaded once.
+		applier, err := tax.NewApplier(tx)
+		if err != nil {
+			return fmt.Errorf("failed to load tax rules: %w", err)
+		}
+
 		// Insert oldest first so the PK (UUIDv7) order is chronological.
 		for i := len(rows) - 1; i >= 0; i-- {
 			txn := &rows[i].txn
@@ -234,15 +242,23 @@ func (h *fidelityTransactionsHandler) Process(db *gorm.DB, file io.Reader, opts 
 				}
 				// Link to an existing holding if there is one; a dividend never
 				// creates a holding on its own.
-				var holding models.Holding
-				switch err := tx.Where("symbol = ?", txn.Symbol).First(&holding).Error; {
+				var holding *models.Holding
+				var found models.Holding
+				switch err := tx.Where("symbol = ?", txn.Symbol).First(&found).Error; {
 				case err == nil:
-					dist.HoldingID = &holding.ID
+					dist.HoldingID = &found.ID
+					holding = &found
 				case !errors.Is(err, gorm.ErrRecordNotFound):
 					return fmt.Errorf("failed to look up holding %s: %w", txn.Symbol, err)
 				}
 				if err := tx.Create(&dist).Error; err != nil {
 					return fmt.Errorf("failed to create distribution for %s on %s: %w", txn.Symbol, txn.Date.Format(fidelityDateLayout), err)
+				}
+				// The income is received now, so its tax treatment is settled
+				// now - the paying security's tax class decides whether it's
+				// ordinary, qualified-eligible, or exempt in each jurisdiction.
+				if err := applier.ApplyToDistribution(&dist, holding); err != nil {
+					return fmt.Errorf("failed to apply tax treatment for %s: %w", txn.Symbol, err)
 				}
 				result.Created++
 
@@ -320,7 +336,7 @@ func (h *fidelityTransactionsHandler) Process(db *gorm.DB, file io.Reader, opts 
 			// rows link to it). Imports are lenient: an unfillable sell realizes
 			// only what it could match.
 			if isSell {
-				realized, _, err := portfolio.DepleteLots(tx, txn, account.DefaultCostBasis)
+				realized, _, err := portfolio.DepleteLots(tx, txn, account.DefaultCostBasis, applier)
 				if err != nil {
 					return fmt.Errorf("failed to deplete lots for %s: %w", txn.Symbol, err)
 				}

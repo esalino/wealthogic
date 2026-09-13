@@ -550,6 +550,223 @@ const docTemplate = `{
                 }
             }
         },
+        "/tax/jurisdictions": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "tax"
+                ],
+                "summary": "List the tax jurisdictions the app knows about",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/TaxJurisdiction"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/tax/profiles": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "tax"
+                ],
+                "summary": "List tax residency profiles",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/TaxProfile"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            },
+            "put": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "tax"
+                ],
+                "summary": "Set a user's tax residency",
+                "parameters": [
+                    {
+                        "description": "Tax profile payload",
+                        "name": "profile",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/TaxProfileRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/TaxProfile"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/tax/recompute": {
+            "post": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "tax"
+                ],
+                "summary": "Re-evaluate every stored tax treatment against the current rules",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/tax/rules": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "tax"
+                ],
+                "summary": "List tax rules, optionally for one jurisdiction",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Filter to one jurisdiction code (e.g. US-CA)",
+                        "name": "jurisdiction",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/TaxRule"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/tax/summary": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "tax"
+                ],
+                "summary": "Taxable income for a year, broken down per jurisdiction",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Tax year (defaults to the current year)",
+                        "name": "year",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/TaxSummary"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/transactions": {
             "get": {
                 "produces": [
@@ -1076,19 +1293,23 @@ const docTemplate = `{
                 "dividend_income": {
                     "type": "number"
                 },
+                "issuer_jurisdiction": {
+                    "type": "string"
+                },
                 "last_price": {
                     "type": "number"
                 },
                 "purchase_quantity": {
                     "type": "number"
                 },
-                "state_tax_exempt": {
-                    "type": "boolean"
-                },
                 "status": {
                     "type": "string"
                 },
                 "symbol": {
+                    "type": "string"
+                },
+                "tax_class_override": {
+                    "description": "TaxClassOverride and IssuerJurisdiction describe the asset's tax\nattributes; nil means \"derive from the asset type\". They replace the old\nstate_tax_exempt flag - what a holding pays and who issued it are facts\nabout the asset, while whether that's exempt is a jurisdiction's rule.",
                     "type": "string"
                 }
             }
@@ -1234,12 +1455,6 @@ const docTemplate = `{
         "DistributionSummary": {
             "type": "object",
             "properties": {
-                "dividend": {
-                    "type": "number"
-                },
-                "other_income": {
-                    "type": "number"
-                },
                 "total": {
                     "type": "number"
                 }
@@ -1302,6 +1517,13 @@ const docTemplate = `{
                     "description": "TransactionID is the realizing transaction (the sell). LotTransactionID is\nthe buy that supplied the disposed shares (capital gains only).",
                     "type": "string"
                 },
+                "treatments": {
+                    "description": "Treatments is how each jurisdiction taxes this gain, recorded when it was\nrealized. The link is by (source_type, source_id) so one treatment table\ncan serve both this ledger and Distribution, which means it isn't a GORM\nassociation - handlers that need it load it explicitly.",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/TaxTreatment"
+                    }
+                },
                 "updated_at": {
                     "type": "string"
                 }
@@ -1360,19 +1582,15 @@ const docTemplate = `{
                 "id": {
                     "type": "string"
                 },
+                "issuer_jurisdiction": {
+                    "description": "IssuerJurisdiction is the government that issued this asset's debt, for\nthe bond classes. It's what the tax rules compare against a jurisdiction\nto decide questions like \"did my own state issue this?\" - nil means the\nasset-type default (see defaultIssuerJurisdiction).",
+                    "type": "string"
+                },
                 "last_price": {
                     "type": "number"
                 },
                 "purchase_quantity": {
                     "type": "number"
-                },
-                "state_exempt": {
-                    "description": "StateExempt is the resolved treatment (override, else the asset-type\ndefault), computed for responses via AfterFind and never persisted.",
-                    "type": "boolean"
-                },
-                "state_tax_exempt": {
-                    "description": "StateTaxExempt overrides the state-tax treatment for this holding. Nil\nmeans \"derive from the asset type\" (see ResolveStateExempt); a non-nil\nvalue is an explicit user choice - e.g. a treasury-only ETF like TLT\nflagged exempt even though ETFs aren't exempt by default.",
-                    "type": "boolean"
                 },
                 "status": {
                     "type": "string"
@@ -1380,8 +1598,45 @@ const docTemplate = `{
                 "symbol": {
                     "type": "string"
                 },
+                "tax_class": {
+                    "description": "TaxClass is the resolved class (override, else the asset-type default),\ncomputed for responses via AfterFind and never persisted.",
+                    "type": "string"
+                },
+                "tax_class_override": {
+                    "description": "TaxClassOverride overrides the tax class implied by the asset type. Nil\nmeans \"derive from the asset type\" (see ResolveTaxClass); a non-nil value\nis an explicit user choice - e.g. a treasury-only ETF like TLT classed as\ngovernment_bond even though ETFs are equity by default.",
+                    "type": "string"
+                },
                 "updated_at": {
                     "type": "string"
+                }
+            }
+        },
+        "JurisdictionSummary": {
+            "type": "object",
+            "properties": {
+                "buckets": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/TaxBucket"
+                    }
+                },
+                "code": {
+                    "type": "string"
+                },
+                "excluded": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/TaxExclusion"
+                    }
+                },
+                "level": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "taxable_total": {
+                    "type": "number"
                 }
             }
         },
@@ -1551,6 +1806,62 @@ const docTemplate = `{
                 }
             }
         },
+        "TaxBucket": {
+            "type": "object",
+            "properties": {
+                "amount": {
+                    "type": "number"
+                },
+                "character": {
+                    "type": "string"
+                },
+                "label": {
+                    "type": "string"
+                }
+            }
+        },
+        "TaxExclusion": {
+            "type": "object",
+            "properties": {
+                "amount": {
+                    "type": "number"
+                },
+                "label": {
+                    "type": "string"
+                },
+                "reason": {
+                    "type": "string"
+                }
+            }
+        },
+        "TaxJurisdiction": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "currency_code": {
+                    "type": "string"
+                },
+                "level": {
+                    "description": "national | regional",
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "parent_code": {
+                    "description": "ParentCode is the jurisdiction this one sits inside, nil for a national\njurisdiction.",
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
         "TaxLot": {
             "type": "object",
             "properties": {
@@ -1600,6 +1911,171 @@ const docTemplate = `{
                 },
                 "transaction": {
                     "$ref": "#/definitions/Transaction"
+                }
+            }
+        },
+        "TaxProfile": {
+            "type": "object",
+            "properties": {
+                "country_code": {
+                    "description": "CountryCode is the national jurisdiction's code; RegionCode the regional\none, nil where the country has no regional income tax or the person isn't\nsubject to one.",
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "effective_from": {
+                    "description": "EffectiveFrom is when this residency started. Only the current profile is\nconsulted today; storing the date means a residency history can be added\nlater without a migration.",
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "region_code": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "user_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "TaxProfileRequest": {
+            "type": "object",
+            "required": [
+                "country_code",
+                "user_id"
+            ],
+            "properties": {
+                "country_code": {
+                    "type": "string"
+                },
+                "region_code": {
+                    "type": "string"
+                },
+                "user_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "TaxRule": {
+            "type": "object",
+            "properties": {
+                "asset_tax_class": {
+                    "type": "string"
+                },
+                "character": {
+                    "description": "Stored as tax_character: \"character\" is a type name in Postgres and can't\nbe used unquoted as a column.",
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "income_type": {
+                    "description": "Match columns. Empty string = matches anything.",
+                    "type": "string"
+                },
+                "issuer_scope": {
+                    "description": "see IssuerScope* above",
+                    "type": "string"
+                },
+                "jurisdiction_code": {
+                    "type": "string"
+                },
+                "note": {
+                    "type": "string"
+                },
+                "priority": {
+                    "description": "Priority orders the match; highest wins. Reason is the machine-readable\nlabel carried onto the resulting treatment so the UI can explain an\nexclusion (\"Excluded - U.S. Treasury interest\").",
+                    "type": "integer"
+                },
+                "reason": {
+                    "type": "string"
+                },
+                "term": {
+                    "description": "short | long, capital gains only",
+                    "type": "string"
+                },
+                "treatment": {
+                    "description": "Outcome.",
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "TaxSummary": {
+            "type": "object",
+            "properties": {
+                "jurisdictions": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/JurisdictionSummary"
+                    }
+                },
+                "year": {
+                    "type": "integer"
+                }
+            }
+        },
+        "TaxTreatment": {
+            "type": "object",
+            "properties": {
+                "account_id": {
+                    "type": "string"
+                },
+                "character": {
+                    "description": "Stored as tax_character: \"character\" is a type name in Postgres and can't\nbe used unquoted as a column.",
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "excluded_amount": {
+                    "type": "number"
+                },
+                "holding_id": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "jurisdiction_code": {
+                    "type": "string"
+                },
+                "reason": {
+                    "type": "string"
+                },
+                "rule_id": {
+                    "description": "RuleID is the rule that decided this, nil when no rule was consulted (a\nsheltered account) or none matched. Reason is its machine-readable label.",
+                    "type": "string"
+                },
+                "source_id": {
+                    "type": "string"
+                },
+                "source_type": {
+                    "description": "The realized event this treatment applies to. SourceType distinguishes the\ntwo ledgers (capital gains vs. income) rather than splitting this into two\nnear-identical tables.",
+                    "type": "string"
+                },
+                "tax_year": {
+                    "description": "TaxYear and AccountID are denormalized from the source row so a year's\nper-jurisdiction summary is a single grouped query with no joins.",
+                    "type": "integer"
+                },
+                "taxable": {
+                    "type": "boolean"
+                },
+                "taxable_amount": {
+                    "description": "TaxableAmount and ExcludedAmount split the source amount by this\njurisdiction's treatment; exactly one is non-zero. Keeping the excluded\nside rather than dropping it is what lets the UI show what was left out\n(\"Excluded - U.S. Treasury interest\") instead of a silently smaller total.",
+                    "type": "number"
+                },
+                "updated_at": {
+                    "type": "string"
                 }
             }
         },
@@ -1685,19 +2161,22 @@ const docTemplate = `{
                 "dividend_income": {
                     "type": "number"
                 },
+                "issuer_jurisdiction": {
+                    "type": "string"
+                },
                 "last_price": {
                     "type": "number"
                 },
                 "purchase_quantity": {
                     "type": "number"
                 },
-                "state_tax_exempt": {
-                    "type": "boolean"
-                },
                 "status": {
                     "type": "string"
                 },
                 "symbol": {
+                    "type": "string"
+                },
+                "tax_class_override": {
                     "type": "string"
                 }
             }

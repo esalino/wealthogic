@@ -22,14 +22,14 @@ func NewDistributionHandler(db *gorm.DB) DistributionHandler {
 	return &distributionHandler{db: db}
 }
 
-// distributionSummary totals a year's income, split into tax buckets:
-// qualifiable equity dividends vs. ordinary "other income" (money-market and
-// treasury income, state-exempt holdings' distributions, and interest).
-// Independent of pagination.
+// distributionSummary totals a year's income, independent of pagination.
+//
+// It deliberately carries no tax-bucket split: how income divides into
+// qualified, ordinary, and exempt depends on the jurisdiction asking, so that
+// breakdown belongs to GET /tax/summary, which reports it per jurisdiction from
+// the stored treatments. Total is the one figure that means the same everywhere.
 type distributionSummary struct {
-	Total       float64 `json:"total"`
-	Dividend    float64 `json:"dividend"`
-	OtherIncome float64 `json:"other_income"`
+	Total float64 `json:"total"`
 } // @name DistributionSummary
 
 type paginatedDistributions struct {
@@ -100,35 +100,13 @@ func (h *distributionHandler) GetDistributions(c *gin.Context) {
 		return
 	}
 
-	// Year totals across all matching rows (not just the page), split into tax
-	// buckets. The dividend-vs-other-income rule depends on the paying security's
-	// tax attributes (asset type, state-exempt override), so resolve it in Go
-	// through the shared classifier rather than in SQL.
-	var all []models.Distribution
-	if err := filter(h.db).Find(&all).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to summarize distributions"})
-		return
-	}
-
-	var holdings []models.Holding
-	if err := h.db.Find(&holdings).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to summarize distributions"})
-		return
-	}
-	bySymbol := make(map[string]*models.Holding, len(holdings))
-	for i := range holdings {
-		bySymbol[holdings[i].Symbol] = &holdings[i]
-	}
-
+	// Year total across all matching rows, not just the page.
 	var summary distributionSummary
-	for i := range all {
-		d := all[i]
-		summary.Total += d.Amount
-		if models.IsQualifiableDividend(d, bySymbol[d.Symbol]) {
-			summary.Dividend += d.Amount
-		} else {
-			summary.OtherIncome += d.Amount
-		}
+	if err := filter(h.db.Model(&models.Distribution{})).
+		Select("COALESCE(SUM(amount), 0) AS total").
+		Scan(&summary).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to summarize distributions"})
+		return
 	}
 
 	var distributions []models.Distribution

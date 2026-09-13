@@ -38,6 +38,7 @@ func main() {
 	distributionHandler := handlers.NewDistributionHandler(database)
 	userHandler := handlers.NewUserHandler(database)
 	uploadHandler := handlers.NewUploadHandler(database)
+	taxHandler := handlers.NewTaxHandler(database)
 
 	r := gin.Default()
 
@@ -76,6 +77,12 @@ func main() {
 	r.POST("/uploads", uploadHandler.Upload)
 	r.GET("/uploads", uploadHandler.GetUploads)
 	r.GET("/upload-transactions", uploadHandler.GetUploadTransactions)
+	r.GET("/tax/summary", taxHandler.GetSummary)
+	r.GET("/tax/jurisdictions", taxHandler.GetJurisdictions)
+	r.GET("/tax/rules", taxHandler.GetRules)
+	r.GET("/tax/profiles", taxHandler.GetProfiles)
+	r.PUT("/tax/profiles", taxHandler.PutProfile)
+	r.POST("/tax/recompute", taxHandler.Recompute)
 
 	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
 

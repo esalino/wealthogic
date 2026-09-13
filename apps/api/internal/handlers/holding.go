@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/eriksalino/wealthogic/api/internal/models"
+	"github.com/eriksalino/wealthogic/api/internal/tax"
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 )
@@ -43,7 +44,13 @@ type createHoldingRequest struct {
 	AverageCostBasis float64 `json:"average_cost_basis"`
 	CostBasisTotal   float64 `json:"cost_basis_total"`
 	DividendIncome   float64 `json:"dividend_income"`
-	StateTaxExempt   *bool   `json:"state_tax_exempt"`
+
+	// TaxClassOverride and IssuerJurisdiction describe the asset's tax
+	// attributes; nil means "derive from the asset type". They replace the old
+	// state_tax_exempt flag - what a holding pays and who issued it are facts
+	// about the asset, while whether that's exempt is a jurisdiction's rule.
+	TaxClassOverride   *string `json:"tax_class_override"`
+	IssuerJurisdiction *string `json:"issuer_jurisdiction"`
 } // @name CreateHoldingRequest
 
 // CreateHolding godoc
@@ -79,7 +86,9 @@ func (h *holdingHandler) CreateHolding(c *gin.Context) {
 		AverageCostBasis: req.AverageCostBasis,
 		CostBasisTotal:   req.CostBasisTotal,
 		DividendIncome:   req.DividendIncome,
-		StateTaxExempt:   req.StateTaxExempt,
+
+		TaxClassOverride:   req.TaxClassOverride,
+		IssuerJurisdiction: req.IssuerJurisdiction,
 	}
 
 	if err := h.db.Create(&holding).Error; err != nil {
@@ -87,7 +96,7 @@ func (h *holdingHandler) CreateHolding(c *gin.Context) {
 		return
 	}
 
-	holding.StateExempt = holding.ResolveStateExempt()
+	holding.TaxClass = holding.ResolveTaxClass()
 	c.JSON(http.StatusCreated, holding)
 }
 
@@ -102,7 +111,9 @@ type updateHoldingRequest struct {
 	AverageCostBasis float64 `json:"average_cost_basis"`
 	CostBasisTotal   float64 `json:"cost_basis_total"`
 	DividendIncome   float64 `json:"dividend_income"`
-	StateTaxExempt   *bool   `json:"state_tax_exempt"`
+
+	TaxClassOverride   *string `json:"tax_class_override"`
+	IssuerJurisdiction *string `json:"issuer_jurisdiction"`
 } // @name UpdateHoldingRequest
 
 // UpdateHolding godoc
@@ -132,6 +143,12 @@ func (h *holdingHandler) UpdateHolding(c *gin.Context) {
 		return
 	}
 
+	// Remember the tax attributes as they stand: if the edit changes what this
+	// asset pays or who issued it, every gain and distribution already realized
+	// from it needs re-evaluating against the rules.
+	priorTaxClass := holding.ResolveTaxClass()
+	priorIssuer := holding.ResolveIssuerJurisdiction()
+
 	if req.AssetType != "" {
 		holding.AssetType = req.AssetType
 	}
@@ -151,7 +168,8 @@ func (h *holdingHandler) UpdateHolding(c *gin.Context) {
 	holding.CostBasisTotal = req.CostBasisTotal
 	holding.DividendIncome = req.DividendIncome
 	// Authoritative: nil clears the override back to the asset-type default.
-	holding.StateTaxExempt = req.StateTaxExempt
+	holding.TaxClassOverride = req.TaxClassOverride
+	holding.IssuerJurisdiction = req.IssuerJurisdiction
 
 	holding.GainUnrealizedAmount = holding.CurrentValue - holding.CostBasisTotal
 	// Avoid NaN/Inf (which JSON can't marshal) when there's no cost basis yet.
@@ -161,12 +179,22 @@ func (h *holdingHandler) UpdateHolding(c *gin.Context) {
 		holding.GainUnrealizedPercent = 0
 	}
 
-	if err := h.db.Save(&holding).Error; err != nil {
+	taxChanged := holding.ResolveTaxClass() != priorTaxClass || holding.ResolveIssuerJurisdiction() != priorIssuer
+
+	if err := h.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Save(&holding).Error; err != nil {
+			return err
+		}
+		if !taxChanged {
+			return nil
+		}
+		return tax.RecomputeHolding(tx, holding.ID)
+	}); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update holding"})
 		return
 	}
 
-	holding.StateExempt = holding.ResolveStateExempt()
+	holding.TaxClass = holding.ResolveTaxClass()
 	c.JSON(http.StatusOK, holding)
 }
 
