@@ -418,16 +418,16 @@ func (h *transactionHandler) DeleteTransaction(c *gin.Context) {
 	c.Status(http.StatusNoContent)
 }
 
-// buyHasDisposals reports whether any Gain row draws from this buy lot, i.e.
-// shares of it have been sold.
+// buyHasDisposals reports whether any realized event draws from this buy lot,
+// i.e. shares of it have been sold.
 func buyHasDisposals(db *gorm.DB, buyID uuid.UUID) (bool, error) {
 	var count int64
-	err := db.Model(&models.Gain{}).Where("lot_transaction_id = ?", buyID).Count(&count).Error
+	err := db.Model(&models.RealizedEvent{}).Where("lot_transaction_id = ?", buyID).Count(&count).Error
 	return count > 0, err
 }
 
 // rebuildHolding recomputes a holding's lot remaining quantities, per-sell
-// realized gains, Gain ledger rows, and aggregates by replaying its sells
+// realized gains, realized-event rows, and aggregates by replaying its sells
 // against its buy lots from scratch. A single sell's depletion can't be reversed
 // in isolation, so any create/edit/delete of a holding's buy or sell rebuilds
 // the whole holding.
@@ -444,17 +444,15 @@ func rebuildHolding(tx *gorm.DB, holdingID uuid.UUID, strict bool) error {
 		return err
 	}
 
-	// Clear this holding's realized ledger and the tax treatments derived from
-	// it; the replay recreates both. Keyed by holding_id, so it also drops rows
-	// from sells that were soft-deleted.
+	// Clear the events this holding's sells produced, and their treatments; the
+	// replay recreates both. Keyed by holding_id, so it also drops rows from
+	// sells that were soft-deleted.
 	//
-	// Every category goes, not just capital gains: a disposal's category follows
-	// the asset's tax class, so leaving other categories behind would duplicate
-	// them on each rebuild.
-	if err := tax.DeleteForHolding(tx, holdingID); err != nil {
-		return err
-	}
-	if err := tx.Where("holding_id = ?", holdingID).Delete(&models.Gain{}).Error; err != nil {
+	// Scoped to disposals: income events in the same ledger derive from
+	// distributions, which this replay cannot reconstruct, so wiping them here
+	// would destroy records that only exist because a user or an import created
+	// them.
+	if err := portfolio.DeleteHoldingDisposalEvents(tx, holdingID); err != nil {
 		return err
 	}
 

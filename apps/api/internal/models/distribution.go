@@ -4,20 +4,25 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 )
 
-// Distribution is one income event paid into an account - a dividend from a
-// security or (later) interest from a cash/savings balance. It's a separate
-// concern from trades (no lots, no price, no cost basis) and from capital gains
-// (no disposal, no holding period), so it gets its own ledger. Like Gain it's
-// derived from imports rather than user-authored, so it carries no soft delete.
+// Distribution is one income payment into an account - a dividend from a
+// security, or interest from a cash or savings balance.
+//
+// It is source data, the peer of Transaction rather than of RealizedEvent: it
+// arrives from an import or is entered by hand, it's the user's to edit, and it
+// cannot be reconstructed from anything else. Hence the soft delete, and hence
+// it holds no tax classification of its own - the RealizedEvent derived from it
+// carries that, and is rebuilt whenever this record changes.
 type Distribution struct {
-	ID        uuid.UUID `gorm:"type:uuid;default:uuidv7();primaryKey" json:"id"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID        uuid.UUID      `gorm:"type:uuid;default:uuidv7();primaryKey" json:"id"`
+	CreatedAt time.Time      `json:"created_at"`
+	UpdatedAt time.Time      `json:"updated_at"`
+	DeletedAt gorm.DeletedAt `gorm:"index"                                 json:"-"`
 
-	// Category is the kind of income: "dividend" (from a security) or "interest"
-	// (from a cash/savings balance, handled later).
+	// Category is the kind of income: "dividend" (from a security) or
+	// "interest" (from a cash/savings balance).
 	Category string `gorm:"not null;default:dividend" json:"category"`
 
 	// HoldingID, Symbol, and AssetType identify the paying security. Symbol and
@@ -41,8 +46,8 @@ type Distribution struct {
 // isn't tracked - in which case the asset type recorded on the distribution
 // itself is the best available signal.
 //
-// The qualified-vs-ordinary question this used to answer directly now belongs to
-// the jurisdiction rules, which read this class: a distribution from an equity
+// The qualified-vs-ordinary question this used to answer directly belongs to the
+// jurisdiction rules, which read this class: a distribution from an equity
 // holding can qualify for a preferential federal rate, while money-market and
 // government-bond income is always ordinary.
 func (d Distribution) ResolveTaxClass(holding *Holding) string {
@@ -67,4 +72,12 @@ func (d Distribution) ResolveIssuerJurisdiction(holding *Holding) string {
 		}
 	}
 	return ""
+}
+
+// IncomeType is the income type this payment realizes.
+func (d Distribution) IncomeType() string {
+	if d.Category == IncomeTypeInterest {
+		return IncomeTypeInterest
+	}
+	return IncomeTypeDividend
 }

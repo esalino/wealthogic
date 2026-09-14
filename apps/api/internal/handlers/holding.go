@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/eriksalino/wealthogic/api/internal/models"
-	"github.com/eriksalino/wealthogic/api/internal/tax"
+	"github.com/eriksalino/wealthogic/api/internal/portfolio"
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 )
@@ -188,7 +188,7 @@ func (h *holdingHandler) UpdateHolding(c *gin.Context) {
 		if !taxChanged {
 			return nil
 		}
-		return tax.RecomputeHolding(tx, holding.ID)
+		return portfolio.RetaxHolding(tx, holding.ID)
 	}); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update holding"})
 		return

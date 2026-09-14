@@ -161,42 +161,160 @@
                         }
                     }
                 }
-            }
-        },
-        "/gains": {
-            "get": {
+            },
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
-                    "gains"
+                    "distributions"
                 ],
-                "summary": "List realized gains with pagination and a year summary",
+                "summary": "Record an income payment by hand",
                 "parameters": [
                     {
-                        "type": "integer",
-                        "description": "Filter to the tax year the gain was realized",
-                        "name": "year",
-                        "in": "query"
+                        "description": "Distribution payload",
+                        "name": "distribution",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/DistributionRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/Distribution"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/distributions/{id}": {
+            "delete": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "distributions"
+                ],
+                "summary": "Delete an income payment",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Distribution ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            },
+            "patch": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "distributions"
+                ],
+                "summary": "Update an income payment",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Distribution ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
                     },
                     {
-                        "type": "integer",
-                        "description": "Page number (default 1)",
-                        "name": "page",
-                        "in": "query"
-                    },
-                    {
-                        "type": "integer",
-                        "description": "Items per page (default 20, max 100)",
-                        "name": "page_size",
-                        "in": "query"
+                        "description": "Distribution payload",
+                        "name": "distribution",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/DistributionRequest"
+                        }
                     }
                 ],
                 "responses": {
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/PaginatedGains"
+                            "$ref": "#/definitions/Distribution"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
                         }
                     },
                     "500": {
@@ -525,6 +643,93 @@
                     },
                     "404": {
                         "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/tax/events": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "tax"
+                ],
+                "summary": "List everything realized in a tax year",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Tax year; omit for all years",
+                        "name": "year",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "capital_gain | interest | dividend",
+                        "name": "category",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "disposal | distribution",
+                        "name": "origin",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter to one security",
+                        "name": "symbol",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter to one account",
+                        "name": "account_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter to one holding",
+                        "name": "holding_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Page number (default 1)",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Items per page (default 20, max 100)",
+                        "name": "page_size",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/PaginatedRealizedEvents"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -1418,7 +1623,7 @@
                     "type": "string"
                 },
                 "category": {
-                    "description": "Category is the kind of income: \"dividend\" (from a security) or \"interest\"\n(from a cash/savings balance, handled later).",
+                    "description": "Category is the kind of income: \"dividend\" (from a security) or\n\"interest\" (from a cash/savings balance).",
                     "type": "string"
                 },
                 "created_at": {
@@ -1446,96 +1651,39 @@
                 }
             }
         },
-        "DistributionSummary": {
+        "DistributionRequest": {
             "type": "object",
-            "properties": {
-                "total": {
-                    "type": "number"
-                }
-            }
-        },
-        "Gain": {
-            "type": "object",
+            "required": [
+                "account_id",
+                "payment_date"
+            ],
             "properties": {
                 "account_id": {
                     "type": "string"
                 },
-                "acquired_date": {
-                    "type": "string"
-                },
                 "amount": {
-                    "description": "realized gain/loss = proceeds - cost_basis",
                     "type": "number"
                 },
                 "asset_type": {
                     "type": "string"
                 },
                 "category": {
-                    "description": "Category is the kind of income realized: IncomeTypeCapitalGain or\nIncomeTypeInterest. Derived from the disposed asset's tax class, so it\nstays correct when that class is corrected.",
-                    "type": "string"
-                },
-                "cost_basis": {
-                    "description": "includes the lot's commission and fees",
-                    "type": "number"
-                },
-                "created_at": {
                     "type": "string"
                 },
                 "holding_id": {
                     "type": "string"
                 },
-                "id": {
-                    "type": "string"
-                },
-                "lot_transaction_id": {
-                    "type": "string"
-                },
-                "proceeds": {
-                    "description": "net of the sell's commission and fees",
-                    "type": "number"
-                },
-                "quantity": {
-                    "description": "shares disposed from the lot",
-                    "type": "number"
-                },
-                "realized_date": {
+                "payment_date": {
                     "type": "string"
                 },
                 "symbol": {
                     "type": "string"
-                },
-                "term": {
-                    "description": "\"short\" | \"long\"",
-                    "type": "string"
-                },
-                "transaction_id": {
-                    "description": "TransactionID is the realizing transaction (the sell). LotTransactionID is\nthe buy that supplied the disposed shares (capital gains only).",
-                    "type": "string"
-                },
-                "treatments": {
-                    "description": "Treatments is how each jurisdiction taxes this gain, recorded when it was\nrealized. The link is by (source_type, source_id) so one treatment table\ncan serve both this ledger and Distribution, which means it isn't a GORM\nassociation - handlers that need it load it explicitly.",
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/TaxTreatment"
-                    }
-                },
-                "updated_at": {
-                    "type": "string"
                 }
             }
         },
-        "GainSummary": {
+        "DistributionSummary": {
             "type": "object",
             "properties": {
-                "interest": {
-                    "type": "number"
-                },
-                "long_term": {
-                    "type": "number"
-                },
-                "short_term": {
-                    "type": "number"
-                },
                 "total": {
                     "type": "number"
                 }
@@ -1681,29 +1829,6 @@
                 }
             }
         },
-        "PaginatedGains": {
-            "type": "object",
-            "properties": {
-                "data": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/Gain"
-                    }
-                },
-                "page": {
-                    "type": "integer"
-                },
-                "page_size": {
-                    "type": "integer"
-                },
-                "summary": {
-                    "$ref": "#/definitions/GainSummary"
-                },
-                "total": {
-                    "type": "integer"
-                }
-            }
-        },
         "PaginatedHoldings": {
             "type": "object",
             "properties": {
@@ -1718,6 +1843,29 @@
                 },
                 "page_size": {
                     "type": "integer"
+                },
+                "total": {
+                    "type": "integer"
+                }
+            }
+        },
+        "PaginatedRealizedEvents": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/RealizedEvent"
+                    }
+                },
+                "page": {
+                    "type": "integer"
+                },
+                "page_size": {
+                    "type": "integer"
+                },
+                "summary": {
+                    "$ref": "#/definitions/RealizedEventSummary"
                 },
                 "total": {
                     "type": "integer"
@@ -1801,6 +1949,97 @@
                 },
                 "total": {
                     "type": "integer"
+                }
+            }
+        },
+        "RealizedEvent": {
+            "type": "object",
+            "properties": {
+                "account_id": {
+                    "type": "string"
+                },
+                "acquired_date": {
+                    "description": "Lot detail, set only for a disposal. Nil on income, which has no lot\nbehind it - distinct from a cost basis that happens to be zero.",
+                    "type": "string"
+                },
+                "amount": {
+                    "type": "number"
+                },
+                "asset_type": {
+                    "type": "string"
+                },
+                "category": {
+                    "description": "Category is what was realized: IncomeTypeCapitalGain, IncomeTypeInterest,\nor IncomeTypeDividend. Origin is which kind of source produced it.",
+                    "type": "string"
+                },
+                "cost_basis": {
+                    "type": "number"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "distribution_id": {
+                    "type": "string"
+                },
+                "event_date": {
+                    "description": "EventDate is when it was realized - the sell's date, or the payment date.\nOne column for both so the ledger sorts and filters by time as a whole.",
+                    "type": "string"
+                },
+                "holding_id": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "lot_transaction_id": {
+                    "type": "string"
+                },
+                "origin": {
+                    "type": "string"
+                },
+                "proceeds": {
+                    "type": "number"
+                },
+                "quantity": {
+                    "type": "number"
+                },
+                "symbol": {
+                    "type": "string"
+                },
+                "term": {
+                    "description": "\"short\" | \"long\"; empty for income",
+                    "type": "string"
+                },
+                "transaction_id": {
+                    "description": "Source links. Two real foreign keys rather than a polymorphic pair, so\neach stays a genuine reference the database can enforce. TransactionID is\nthe realizing sell and LotTransactionID the buy that supplied the shares;\nDistributionID is the income record. Exactly one origin's ids are set.",
+                    "type": "string"
+                },
+                "treatments": {
+                    "description": "Treatments is how each jurisdiction taxes this event. A real association\nnow that the ledger is one table, so it preloads like any other.",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/TaxTreatment"
+                    }
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "RealizedEventSummary": {
+            "type": "object",
+            "properties": {
+                "capital_gains": {
+                    "type": "number"
+                },
+                "dividends": {
+                    "type": "number"
+                },
+                "interest": {
+                    "type": "number"
+                },
+                "total": {
+                    "type": "number"
                 }
             }
         },
@@ -2025,9 +2264,6 @@
         "TaxTreatment": {
             "type": "object",
             "properties": {
-                "account_id": {
-                    "type": "string"
-                },
                 "character": {
                     "description": "Stored as tax_character: \"character\" is a type name in Postgres and can't\nbe used unquoted as a column.",
                     "type": "string"
@@ -2038,13 +2274,14 @@
                 "excluded_amount": {
                     "type": "number"
                 },
-                "holding_id": {
-                    "type": "string"
-                },
                 "id": {
                     "type": "string"
                 },
                 "jurisdiction_code": {
+                    "type": "string"
+                },
+                "realized_event_id": {
+                    "description": "RealizedEventID is a real foreign key: one ledger means this can be a\nplain association rather than a polymorphic (type, id) pair, so treatments\npreload with their events instead of being stitched together by hand.",
                     "type": "string"
                 },
                 "reason": {
@@ -2054,22 +2291,15 @@
                     "description": "RuleID is the rule that decided this, nil when no rule was consulted (a\nsheltered account) or none matched. Reason is its machine-readable label.",
                     "type": "string"
                 },
-                "source_id": {
-                    "type": "string"
-                },
-                "source_type": {
-                    "description": "The realized event this treatment applies to. SourceType distinguishes the\ntwo ledgers (capital gains vs. income) rather than splitting this into two\nnear-identical tables.",
-                    "type": "string"
-                },
                 "tax_year": {
-                    "description": "TaxYear and AccountID are denormalized from the source row so a year's\nper-jurisdiction summary is a single grouped query with no joins.",
+                    "description": "TaxYear is denormalized from the event so a year's per-jurisdiction\nsummary stays a single grouped query with no join. It's rewritten with the\ntreatment, so it can't drift from the event it came from.",
                     "type": "integer"
                 },
                 "taxable": {
                     "type": "boolean"
                 },
                 "taxable_amount": {
-                    "description": "TaxableAmount and ExcludedAmount split the source amount by this\njurisdiction's treatment; exactly one is non-zero. Keeping the excluded\nside rather than dropping it is what lets the UI show what was left out\n(\"Excluded - U.S. Treasury interest\") instead of a silently smaller total.",
+                    "description": "TaxableAmount and ExcludedAmount split the event's amount by this\njurisdiction's treatment; exactly one is non-zero. Keeping the excluded\nside rather than dropping it is what lets the UI show what was left out\n(\"Excluded - U.S. Treasury interest\") instead of a silently smaller total.",
                     "type": "number"
                 },
                 "updated_at": {

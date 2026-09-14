@@ -101,22 +101,24 @@ func DepleteLots(tx *gorm.DB, sell *models.Transaction, costBasisMethod string, 
 			term = "long" // held more than one year
 		}
 
-		g := models.Gain{
+		acquired := buy.Date
+		g := models.RealizedEvent{
 			// A disposal doesn't always realize a capital gain - redeeming a
 			// discount instrument realizes interest - so the asset's tax class
 			// decides, not the action that disposed of it.
 			Category:         models.DisposalIncomeType(holding.ResolveTaxClass()),
+			Origin:           models.OriginDisposal,
 			HoldingID:        sell.HoldingID,
 			AccountID:        sell.AccountID,
 			Symbol:           holding.Symbol,
 			AssetType:        holding.AssetType,
-			TransactionID:    sell.ID,
+			TransactionID:    &sell.ID,
 			LotTransactionID: &buy.ID,
-			AcquiredDate:     buy.Date,
-			RealizedDate:     sell.Date,
-			Quantity:         take,
-			CostBasis:        costBasis,
-			Proceeds:         proceeds,
+			AcquiredDate:     &acquired,
+			EventDate:        sell.Date,
+			Quantity:         &take,
+			CostBasis:        &costBasis,
+			Proceeds:         &proceeds,
 			Term:             term,
 			Amount:           gain,
 		}
@@ -124,9 +126,9 @@ func DepleteLots(tx *gorm.DB, sell *models.Transaction, costBasisMethod string, 
 			return 0, 0, err
 		}
 
-		// The gain is realized now, so its tax treatment is settled now - by the
+		// The event is realized now, so its tax treatment is settled now - by the
 		// rules and the holding's tax attributes as they stand at realization.
-		if err := applier.ApplyToGain(&g, &holding); err != nil {
+		if err := applier.Apply(&g, &holding); err != nil {
 			return 0, 0, err
 		}
 
@@ -173,18 +175,21 @@ func RecalcHolding(tx *gorm.DB, holding *models.Holding) error {
 		holding.GainUnrealizedPercent = 0
 	}
 
-	// Realized amounts come straight from the Gain ledger for this holding, every
-	// category of it: a Treasury's return is realized as interest rather than a
-	// capital gain, and filtering to capital gains would report it as having
-	// earned nothing.
-	var gains []models.Gain
-	if err := tx.Where("holding_id = ?", holding.ID).Find(&gains).Error; err != nil {
+	// Realized amounts come from this holding's disposals. Income is excluded:
+	// a dividend has no cost basis, so folding it in would make the realized
+	// percentage meaningless. A Treasury's return counts, though it's interest
+	// rather than a capital gain - it still came from disposing of a lot.
+	var disposals []models.RealizedEvent
+	if err := tx.Where("holding_id = ? AND origin = ?", holding.ID, models.OriginDisposal).
+		Find(&disposals).Error; err != nil {
 		return err
 	}
 	var realizedAmount, realizedCostBasis float64
-	for _, g := range gains {
+	for _, g := range disposals {
 		realizedAmount += g.Amount
-		realizedCostBasis += g.CostBasis
+		if g.CostBasis != nil {
+			realizedCostBasis += *g.CostBasis
+		}
 	}
 	holding.GainRealizedAmount = realizedAmount
 	if realizedCostBasis > 0 {

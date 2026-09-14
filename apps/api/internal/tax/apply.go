@@ -106,9 +106,12 @@ func (a *Applier) contextFor(accountID uuid.UUID) (Context, error) {
 	}, nil
 }
 
-// ApplyToGain writes the per-jurisdiction treatments for one realized disposal.
-// holding is the disposed security, or nil when it isn't tracked.
-func (a *Applier) ApplyToGain(g *models.Gain, holding *models.Holding) error {
+// Apply writes the per-jurisdiction treatments for one realized event. holding
+// is the security behind it, or nil when it isn't tracked.
+//
+// One ledger means one entry point: a disposal and a dividend differ only in the
+// attributes they carry into the rules, not in how they're evaluated or stored.
+func (a *Applier) Apply(ev *models.RealizedEvent, holding *models.Holding) error {
 	assetClass := models.TaxClassOther
 	issuer := ""
 	if holding != nil {
@@ -116,74 +119,13 @@ func (a *Applier) ApplyToGain(g *models.Gain, holding *models.Holding) error {
 		issuer = holding.ResolveIssuerJurisdiction()
 	}
 
-	// The category says what the disposal realized - a capital gain for most
-	// assets, interest for a discount instrument redeemed at par - so the rules
-	// see a Treasury redemption as the interest it is.
-	incomeType := g.Category
-	if incomeType == "" {
-		incomeType = models.IncomeTypeCapitalGain
-	}
-
-	// Holding period has no bearing on interest, and leaving it set would let a
-	// term-matching rule catch income it was never meant to.
-	term := g.Term
-	if incomeType != models.IncomeTypeCapitalGain {
+	// Holding period has no bearing on anything but a capital gain, and leaving
+	// it set would let a term-matching rule catch income it was never meant to.
+	term := ev.Term
+	if ev.Category != models.IncomeTypeCapitalGain {
 		term = ""
 	}
 
-	return a.apply(Event{
-		SourceType:         models.TaxSourceGain,
-		SourceID:           g.ID,
-		IncomeType:         incomeType,
-		Amount:             g.Amount,
-		Term:               term,
-		AssetTaxClass:      assetClass,
-		IssuerJurisdiction: issuer,
-		TaxYear:            g.RealizedDate.Year(),
-		AccountID:          g.AccountID,
-		HoldingID:          g.HoldingID,
-	})
-}
-
-// reclassifyGain corrects a gain's category to match its holding's current tax
-// class. The category is derived, so correcting a holding's class has to reach
-// the events already realized from it - otherwise a mis-set class stays baked
-// into the ledger forever.
-func reclassifyGain(tx *gorm.DB, g *models.Gain, holding *models.Holding) error {
-	if holding == nil {
-		return nil
-	}
-	want := models.DisposalIncomeType(holding.ResolveTaxClass())
-	if g.Category == want {
-		return nil
-	}
-	g.Category = want
-	return tx.Model(g).Update("category", want).Error
-}
-
-// ApplyToDistribution writes the per-jurisdiction treatments for one income
-// payment. holding is the paying security, or nil when it isn't tracked.
-func (a *Applier) ApplyToDistribution(d *models.Distribution, holding *models.Holding) error {
-	incomeType := models.IncomeTypeDividend
-	if d.Category == models.IncomeTypeInterest {
-		incomeType = models.IncomeTypeInterest
-	}
-
-	return a.apply(Event{
-		SourceType:         models.TaxSourceDistribution,
-		SourceID:           d.ID,
-		IncomeType:         incomeType,
-		Amount:             d.Amount,
-		AssetTaxClass:      d.ResolveTaxClass(holding),
-		IssuerJurisdiction: d.ResolveIssuerJurisdiction(holding),
-		TaxYear:            d.PaymentDate.Year(),
-		AccountID:          d.AccountID,
-		HoldingID:          d.HoldingID,
-	})
-}
-
-// apply evaluates an event and replaces its stored treatments.
-func (a *Applier) apply(ev Event) error {
 	ctx, err := a.contextFor(ev.AccountID)
 	if err != nil {
 		return err
@@ -191,76 +133,30 @@ func (a *Applier) apply(ev Event) error {
 
 	// Replace rather than upsert: the jurisdiction set itself can change (a move,
 	// an edited profile), which leaves stale rows an upsert would never touch.
-	if err := a.tx.Where("source_type = ? AND source_id = ?", ev.SourceType, ev.SourceID).
-		Delete(&models.TaxTreatment{}).Error; err != nil {
+	if err := a.tx.Where("realized_event_id = ?", ev.ID).Delete(&models.TaxTreatment{}).Error; err != nil {
 		return err
 	}
 
-	treatments := Evaluate(ev, ctx)
+	treatments := Evaluate(Event{
+		RealizedEventID:    ev.ID,
+		IncomeType:         ev.Category,
+		Amount:             ev.Amount,
+		Term:               term,
+		AssetTaxClass:      assetClass,
+		IssuerJurisdiction: issuer,
+		TaxYear:            ev.EventDate.Year(),
+	}, ctx)
 	if len(treatments) == 0 {
 		return nil
 	}
 	return a.tx.Create(&treatments).Error
 }
 
-// DeleteForHolding removes every treatment belonging to a holding's events. The
-// gain ledger is rebuilt from scratch when a holding's trades change; its
-// treatments have to go with it or they outlive the rows they describe.
-func DeleteForHolding(tx *gorm.DB, holdingID uuid.UUID) error {
-	return tx.Where("holding_id = ? AND source_type = ?", holdingID, models.TaxSourceGain).
-		Delete(&models.TaxTreatment{}).Error
-}
-
-// RecomputeHolding re-evaluates every treatment for a holding's gains and
-// distributions, for when the holding's own tax attributes change - a tax class
-// or issuer edit changes the answer for events already realized.
-func RecomputeHolding(tx *gorm.DB, holdingID uuid.UUID) error {
-	applier, err := NewApplier(tx)
-	if err != nil {
-		return err
-	}
-
-	var holding models.Holding
-	if err := tx.First(&holding, "id = ?", holdingID).Error; err != nil {
-		return err
-	}
-
-	var gains []models.Gain
-	if err := tx.Where("holding_id = ?", holdingID).Find(&gains).Error; err != nil {
-		return err
-	}
-	for i := range gains {
-		// The holding's tax class may have just changed, which can change what
-		// its disposals realized, not only how it's taxed.
-		if err := reclassifyGain(tx, &gains[i], &holding); err != nil {
-			return err
-		}
-		if err := applier.ApplyToGain(&gains[i], &holding); err != nil {
-			return err
-		}
-	}
-
-	// A security's dividends can predate its first buy, so they carry the symbol
-	// but a null holding_id - match on either, as the distributions handler does.
-	var dists []models.Distribution
-	q := tx.Where("holding_id = ?", holdingID)
-	if holding.Symbol != "" {
-		q = tx.Where("holding_id = ? OR symbol = ?", holdingID, holding.Symbol)
-	}
-	if err := q.Find(&dists).Error; err != nil {
-		return err
-	}
-	for i := range dists {
-		if err := applier.ApplyToDistribution(&dists[i], &holding); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// RecomputeAll rebuilds every treatment from the current rules. Called after the
-// one-time migration and exposed on the API, since editing a rule changes the
-// answer for events already realized.
+// RecomputeAll rebuilds every treatment from the current rules. Exposed on the
+// API because editing a rule changes the answer for events already realized.
+//
+// It re-evaluates rather than re-derives: the events themselves come from their
+// source records and are rebuilt by the portfolio package.
 func RecomputeAll(tx *gorm.DB) error {
 	applier, err := NewApplier(tx)
 	if err != nil {
@@ -280,37 +176,21 @@ func RecomputeAll(tx *gorm.DB) error {
 		}
 	}
 
-	// Resolve a security by its id, falling back to its symbol for rows recorded
-	// before a matching holding existed.
-	resolve := func(holdingID *uuid.UUID, symbol string) *models.Holding {
-		if holdingID != nil {
-			if h, ok := byID[*holdingID]; ok {
-				return h
-			}
-		}
-		return bySymbol[symbol]
-	}
-
-	var gains []models.Gain
-	if err := tx.Find(&gains).Error; err != nil {
+	var events []models.RealizedEvent
+	if err := tx.Find(&events).Error; err != nil {
 		return err
 	}
-	for i := range gains {
-		holding := resolve(gains[i].HoldingID, gains[i].Symbol)
-		if err := reclassifyGain(tx, &gains[i], holding); err != nil {
-			return err
+	for i := range events {
+		// Resolve the security by id, falling back to its symbol for events
+		// recorded before a matching holding existed.
+		var holding *models.Holding
+		if events[i].HoldingID != nil {
+			holding = byID[*events[i].HoldingID]
 		}
-		if err := applier.ApplyToGain(&gains[i], holding); err != nil {
-			return err
+		if holding == nil {
+			holding = bySymbol[events[i].Symbol]
 		}
-	}
-
-	var dists []models.Distribution
-	if err := tx.Find(&dists).Error; err != nil {
-		return err
-	}
-	for i := range dists {
-		if err := applier.ApplyToDistribution(&dists[i], resolve(dists[i].HoldingID, dists[i].Symbol)); err != nil {
+		if err := applier.Apply(&events[i], holding); err != nil {
 			return err
 		}
 	}

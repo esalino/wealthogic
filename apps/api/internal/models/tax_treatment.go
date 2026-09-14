@@ -6,51 +6,42 @@ import (
 	"github.com/google/uuid"
 )
 
-// The ledgers a tax treatment can attach to.
-const (
-	TaxSourceGain         = "gain"
-	TaxSourceDistribution = "distribution"
-)
-
 // Reasons recorded on a treatment beyond the rule's own. ReasonShelteredAccount
 // is set by the short-circuit for tax-advantaged accounts, which applies before
-// any jurisdiction rule runs.
+// any jurisdiction rule.
 const (
 	ReasonShelteredAccount = "tax_advantaged_account"
 )
 
-// TaxTreatment is how one jurisdiction treats one realized taxable event: a
-// Gain row or a Distribution row gets one treatment per jurisdiction the
-// taxpayer is subject to, written when the event is realized.
+// TaxTreatment is how one jurisdiction treats one realized event: each
+// RealizedEvent gets one treatment per jurisdiction the taxpayer is subject to,
+// written when the event is realized.
 //
 // Persisting the outcome per jurisdiction (rather than deriving it on read) is
 // what lets the Tax Center total a year's income per jurisdiction and character
 // in SQL, and what lets each figure point at the rule that produced it.
 //
-// Like Gain and Distribution this is a derived ledger, rebuilt when its source
-// or the rules change, so it carries no soft delete.
+// Rebuilt whenever its event is, so no soft delete.
 type TaxTreatment struct {
 	ID        uuid.UUID `gorm:"type:uuid;default:uuidv7();primaryKey" json:"id"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 
-	// The realized event this treatment applies to. SourceType distinguishes the
-	// two ledgers (capital gains vs. income) rather than splitting this into two
-	// near-identical tables.
-	SourceType string    `gorm:"size:16;not null;uniqueIndex:idx_tax_treatment_source,priority:1" json:"source_type"`
-	SourceID   uuid.UUID `gorm:"type:uuid;not null;uniqueIndex:idx_tax_treatment_source,priority:2" json:"source_id"`
+	// RealizedEventID is a real foreign key: one ledger means this can be a
+	// plain association rather than a polymorphic (type, id) pair, so treatments
+	// preload with their events instead of being stitched together by hand.
+	RealizedEventID uuid.UUID `gorm:"type:uuid;not null;uniqueIndex:idx_tax_treatment_event,priority:1" json:"realized_event_id"`
 
-	JurisdictionCode string `gorm:"size:16;not null;uniqueIndex:idx_tax_treatment_source,priority:3;index:idx_tax_treatment_year,priority:2" json:"jurisdiction_code"`
+	JurisdictionCode string `gorm:"size:16;not null;uniqueIndex:idx_tax_treatment_event,priority:2;index:idx_tax_treatment_year,priority:2" json:"jurisdiction_code"`
 
-	// TaxYear and AccountID are denormalized from the source row so a year's
-	// per-jurisdiction summary is a single grouped query with no joins.
-	TaxYear   int        `gorm:"not null;index:idx_tax_treatment_year,priority:1" json:"tax_year"`
-	AccountID uuid.UUID  `gorm:"type:uuid;index" json:"account_id"`
-	HoldingID *uuid.UUID `gorm:"type:uuid;index" json:"holding_id"`
+	// TaxYear is denormalized from the event so a year's per-jurisdiction
+	// summary stays a single grouped query with no join. It's rewritten with the
+	// treatment, so it can't drift from the event it came from.
+	TaxYear int `gorm:"not null;index:idx_tax_treatment_year,priority:1" json:"tax_year"`
 
 	Taxable bool `gorm:"not null" json:"taxable"`
 
-	// TaxableAmount and ExcludedAmount split the source amount by this
+	// TaxableAmount and ExcludedAmount split the event's amount by this
 	// jurisdiction's treatment; exactly one is non-zero. Keeping the excluded
 	// side rather than dropping it is what lets the UI show what was left out
 	// ("Excluded - U.S. Treasury interest") instead of a silently smaller total.

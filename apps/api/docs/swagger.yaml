@@ -157,8 +157,8 @@ definitions:
         type: string
       category:
         description: |-
-          Category is the kind of income: "dividend" (from a security) or "interest"
-          (from a cash/savings balance, handled later).
+          Category is the kind of income: "dividend" (from a security) or
+          "interest" (from a cash/savings balance).
         type: string
       created_at:
         type: string
@@ -182,77 +182,28 @@ definitions:
       updated_at:
         type: string
     type: object
-  DistributionSummary:
-    properties:
-      total:
-        type: number
-    type: object
-  Gain:
+  DistributionRequest:
     properties:
       account_id:
         type: string
-      acquired_date:
-        type: string
       amount:
-        description: realized gain/loss = proceeds - cost_basis
         type: number
       asset_type:
         type: string
       category:
-        description: |-
-          Category is the kind of income realized: IncomeTypeCapitalGain or
-          IncomeTypeInterest. Derived from the disposed asset's tax class, so it
-          stays correct when that class is corrected.
-        type: string
-      cost_basis:
-        description: includes the lot's commission and fees
-        type: number
-      created_at:
         type: string
       holding_id:
         type: string
-      id:
-        type: string
-      lot_transaction_id:
-        type: string
-      proceeds:
-        description: net of the sell's commission and fees
-        type: number
-      quantity:
-        description: shares disposed from the lot
-        type: number
-      realized_date:
+      payment_date:
         type: string
       symbol:
         type: string
-      term:
-        description: '"short" | "long"'
-        type: string
-      transaction_id:
-        description: |-
-          TransactionID is the realizing transaction (the sell). LotTransactionID is
-          the buy that supplied the disposed shares (capital gains only).
-        type: string
-      treatments:
-        description: |-
-          Treatments is how each jurisdiction taxes this gain, recorded when it was
-          realized. The link is by (source_type, source_id) so one treatment table
-          can serve both this ledger and Distribution, which means it isn't a GORM
-          association - handlers that need it load it explicitly.
-        items:
-          $ref: '#/definitions/TaxTreatment'
-        type: array
-      updated_at:
-        type: string
+    required:
+    - account_id
+    - payment_date
     type: object
-  GainSummary:
+  DistributionSummary:
     properties:
-      interest:
-        type: number
-      long_term:
-        type: number
-      short_term:
-        type: number
       total:
         type: number
     type: object
@@ -359,21 +310,6 @@ definitions:
       total:
         type: integer
     type: object
-  PaginatedGains:
-    properties:
-      data:
-        items:
-          $ref: '#/definitions/Gain'
-        type: array
-      page:
-        type: integer
-      page_size:
-        type: integer
-      summary:
-        $ref: '#/definitions/GainSummary'
-      total:
-        type: integer
-    type: object
   PaginatedHoldings:
     properties:
       data:
@@ -384,6 +320,21 @@ definitions:
         type: integer
       page_size:
         type: integer
+      total:
+        type: integer
+    type: object
+  PaginatedRealizedEvents:
+    properties:
+      data:
+        items:
+          $ref: '#/definitions/RealizedEvent'
+        type: array
+      page:
+        type: integer
+      page_size:
+        type: integer
+      summary:
+        $ref: '#/definitions/RealizedEventSummary'
       total:
         type: integer
     type: object
@@ -438,6 +389,80 @@ definitions:
         type: integer
       total:
         type: integer
+    type: object
+  RealizedEvent:
+    properties:
+      account_id:
+        type: string
+      acquired_date:
+        description: |-
+          Lot detail, set only for a disposal. Nil on income, which has no lot
+          behind it - distinct from a cost basis that happens to be zero.
+        type: string
+      amount:
+        type: number
+      asset_type:
+        type: string
+      category:
+        description: |-
+          Category is what was realized: IncomeTypeCapitalGain, IncomeTypeInterest,
+          or IncomeTypeDividend. Origin is which kind of source produced it.
+        type: string
+      cost_basis:
+        type: number
+      created_at:
+        type: string
+      distribution_id:
+        type: string
+      event_date:
+        description: |-
+          EventDate is when it was realized - the sell's date, or the payment date.
+          One column for both so the ledger sorts and filters by time as a whole.
+        type: string
+      holding_id:
+        type: string
+      id:
+        type: string
+      lot_transaction_id:
+        type: string
+      origin:
+        type: string
+      proceeds:
+        type: number
+      quantity:
+        type: number
+      symbol:
+        type: string
+      term:
+        description: '"short" | "long"; empty for income'
+        type: string
+      transaction_id:
+        description: |-
+          Source links. Two real foreign keys rather than a polymorphic pair, so
+          each stays a genuine reference the database can enforce. TransactionID is
+          the realizing sell and LotTransactionID the buy that supplied the shares;
+          DistributionID is the income record. Exactly one origin's ids are set.
+        type: string
+      treatments:
+        description: |-
+          Treatments is how each jurisdiction taxes this event. A real association
+          now that the ledger is one table, so it preloads like any other.
+        items:
+          $ref: '#/definitions/TaxTreatment'
+        type: array
+      updated_at:
+        type: string
+    type: object
+  RealizedEventSummary:
+    properties:
+      capital_gains:
+        type: number
+      dividends:
+        type: number
+      interest:
+        type: number
+      total:
+        type: number
     type: object
   TaxBucket:
     properties:
@@ -600,8 +625,6 @@ definitions:
     type: object
   TaxTreatment:
     properties:
-      account_id:
-        type: string
       character:
         description: |-
           Stored as tax_character: "character" is a type name in Postgres and can't
@@ -611,11 +634,15 @@ definitions:
         type: string
       excluded_amount:
         type: number
-      holding_id:
-        type: string
       id:
         type: string
       jurisdiction_code:
+        type: string
+      realized_event_id:
+        description: |-
+          RealizedEventID is a real foreign key: one ledger means this can be a
+          plain association rather than a polymorphic (type, id) pair, so treatments
+          preload with their events instead of being stitched together by hand.
         type: string
       reason:
         type: string
@@ -624,24 +651,17 @@ definitions:
           RuleID is the rule that decided this, nil when no rule was consulted (a
           sheltered account) or none matched. Reason is its machine-readable label.
         type: string
-      source_id:
-        type: string
-      source_type:
-        description: |-
-          The realized event this treatment applies to. SourceType distinguishes the
-          two ledgers (capital gains vs. income) rather than splitting this into two
-          near-identical tables.
-        type: string
       tax_year:
         description: |-
-          TaxYear and AccountID are denormalized from the source row so a year's
-          per-jurisdiction summary is a single grouped query with no joins.
+          TaxYear is denormalized from the event so a year's per-jurisdiction
+          summary stays a single grouped query with no join. It's rewritten with the
+          treatment, so it can't drift from the event it came from.
         type: integer
       taxable:
         type: boolean
       taxable_amount:
         description: |-
-          TaxableAmount and ExcludedAmount split the source amount by this
+          TaxableAmount and ExcludedAmount split the event's amount by this
           jurisdiction's treatment; exactly one is non-zero. Keeping the excluded
           side rather than dropping it is what lets the UI show what was left out
           ("Excluded - U.S. Treasury interest") instead of a silently smaller total.
@@ -957,37 +977,115 @@ paths:
         a year summary
       tags:
       - distributions
-  /gains:
-    get:
+    post:
+      consumes:
+      - application/json
       parameters:
-      - description: Filter to the tax year the gain was realized
-        in: query
-        name: year
-        type: integer
-      - description: Page number (default 1)
-        in: query
-        name: page
-        type: integer
-      - description: Items per page (default 20, max 100)
-        in: query
-        name: page_size
-        type: integer
+      - description: Distribution payload
+        in: body
+        name: distribution
+        required: true
+        schema:
+          $ref: '#/definitions/DistributionRequest'
       produces:
       - application/json
       responses:
-        "200":
-          description: OK
+        "201":
+          description: Created
           schema:
-            $ref: '#/definitions/PaginatedGains'
+            $ref: '#/definitions/Distribution'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
         "500":
           description: Internal Server Error
           schema:
             additionalProperties:
               type: string
             type: object
-      summary: List realized gains with pagination and a year summary
+      summary: Record an income payment by hand
       tags:
-      - gains
+      - distributions
+  /distributions/{id}:
+    delete:
+      parameters:
+      - description: Distribution ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: No Content
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Delete an income payment
+      tags:
+      - distributions
+    patch:
+      consumes:
+      - application/json
+      parameters:
+      - description: Distribution ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Distribution payload
+        in: body
+        name: distribution
+        required: true
+        schema:
+          $ref: '#/definitions/DistributionRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/Distribution'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Update an income payment
+      tags:
+      - distributions
   /holdings:
     get:
       parameters:
@@ -1208,6 +1306,63 @@ paths:
       summary: Update a tax lot
       tags:
       - tax-lots
+  /tax/events:
+    get:
+      parameters:
+      - description: Tax year; omit for all years
+        in: query
+        name: year
+        type: integer
+      - description: capital_gain | interest | dividend
+        in: query
+        name: category
+        type: string
+      - description: disposal | distribution
+        in: query
+        name: origin
+        type: string
+      - description: Filter to one security
+        in: query
+        name: symbol
+        type: string
+      - description: Filter to one account
+        in: query
+        name: account_id
+        type: string
+      - description: Filter to one holding
+        in: query
+        name: holding_id
+        type: string
+      - description: Page number (default 1)
+        in: query
+        name: page
+        type: integer
+      - description: Items per page (default 20, max 100)
+        in: query
+        name: page_size
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/PaginatedRealizedEvents'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: List everything realized in a tax year
+      tags:
+      - tax
   /tax/jurisdictions:
     get:
       produces:

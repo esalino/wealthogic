@@ -18,6 +18,7 @@ type TaxHandler interface {
 	GetJurisdictions(c *gin.Context)
 	GetRules(c *gin.Context)
 	GetSummary(c *gin.Context)
+	GetEvents(c *gin.Context)
 	GetProfiles(c *gin.Context)
 	PutProfile(c *gin.Context)
 	Recompute(c *gin.Context)
@@ -362,4 +363,124 @@ func (h *taxHandler) PutProfile(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, profile)
+}
+
+// realizedEventSummary totals the year by what was realized. The split is by
+// category rather than by tax bucket: how these amounts are taxed differs per
+// jurisdiction and is reported by GET /tax/summary, while this is the ledger.
+type realizedEventSummary struct {
+	Total        float64 `json:"total"`
+	CapitalGains float64 `json:"capital_gains"`
+	Interest     float64 `json:"interest"`
+	Dividends    float64 `json:"dividends"`
+} // @name RealizedEventSummary
+
+type paginatedRealizedEvents struct {
+	Data     []models.RealizedEvent `json:"data"`
+	Total    int64                  `json:"total"`
+	Page     int                    `json:"page"`
+	PageSize int                    `json:"page_size"`
+	Summary  realizedEventSummary   `json:"summary"`
+} // @name PaginatedRealizedEvents
+
+// GetEvents godoc
+// @Summary      List everything realized in a tax year
+// @Tags         tax
+// @Produce      json
+// @Param        year        query     int     false  "Tax year; omit for all years"
+// @Param        category    query     string  false  "capital_gain | interest | dividend"
+// @Param        origin      query     string  false  "disposal | distribution"
+// @Param        symbol      query     string  false  "Filter to one security"
+// @Param        account_id  query     string  false  "Filter to one account"
+// @Param        holding_id  query     string  false  "Filter to one holding"
+// @Param        page        query     int     false  "Page number (default 1)"
+// @Param        page_size   query     int     false  "Items per page (default 20, max 100)"
+// @Success      200         {object}  paginatedRealizedEvents
+// @Failure      400         {object}  map[string]string
+// @Failure      500         {object}  map[string]string
+// @Router       /tax/events [get]
+//
+// Capital gains, Treasury interest, and dividends all live in one ledger, so
+// filtering, sorting, and paging are a plain query over a single table rather
+// than a union of the two ledgers this used to read.
+func (h *taxHandler) GetEvents(c *gin.Context) {
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 || pageSize > 100 {
+		pageSize = 20
+	}
+
+	// Each filter is optional and they compose; applied identically to the
+	// count, the summary, and the page so all three agree.
+	var filterErr error
+	filter := func(q *gorm.DB) *gorm.DB {
+		if y := c.Query("year"); y != "" {
+			if year, err := strconv.Atoi(y); err == nil {
+				q = q.Where("EXTRACT(YEAR FROM event_date) = ?", year)
+			}
+		}
+		if v := c.Query("category"); v != "" {
+			q = q.Where("category = ?", v)
+		}
+		if v := c.Query("origin"); v != "" {
+			q = q.Where("origin = ?", v)
+		}
+		if v := c.Query("symbol"); v != "" {
+			q = q.Where("symbol = ?", v)
+		}
+		for param, column := range map[string]string{"account_id": "account_id", "holding_id": "holding_id"} {
+			if v := c.Query(param); v != "" {
+				id, err := uuid.Parse(v)
+				if err != nil {
+					filterErr = err
+					continue
+				}
+				q = q.Where(column+" = ?", id)
+			}
+		}
+		return q
+	}
+
+	var total int64
+	if err := filter(h.db.Model(&models.RealizedEvent{})).Count(&total).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch realized events"})
+		return
+	}
+	if filterErr != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id filter"})
+		return
+	}
+
+	var summary realizedEventSummary
+	if err := filter(h.db.Model(&models.RealizedEvent{})).
+		Select("COALESCE(SUM(amount), 0) AS total, " +
+			"COALESCE(SUM(amount) FILTER (WHERE category = 'capital_gain'), 0) AS capital_gains, " +
+			"COALESCE(SUM(amount) FILTER (WHERE category = 'interest'), 0) AS interest, " +
+			"COALESCE(SUM(amount) FILTER (WHERE category = 'dividend'), 0) AS dividends").
+		Scan(&summary).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to summarize realized events"})
+		return
+	}
+
+	// Treatments are a real association now, so they preload rather than being
+	// stitched on by hand.
+	var events []models.RealizedEvent
+	if err := filter(h.db.Preload("Treatments")).
+		Order("event_date DESC").Order("id DESC").
+		Offset((page - 1) * pageSize).Limit(pageSize).
+		Find(&events).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch realized events"})
+		return
+	}
+
+	c.JSON(http.StatusOK, paginatedRealizedEvents{
+		Data:     events,
+		Total:    total,
+		Page:     page,
+		PageSize: pageSize,
+		Summary:  summary,
+	})
 }

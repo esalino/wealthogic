@@ -242,23 +242,21 @@ func (h *fidelityTransactionsHandler) Process(db *gorm.DB, file io.Reader, opts 
 				}
 				// Link to an existing holding if there is one; a dividend never
 				// creates a holding on its own.
-				var holding *models.Holding
 				var found models.Holding
 				switch err := tx.Where("symbol = ?", txn.Symbol).First(&found).Error; {
 				case err == nil:
 					dist.HoldingID = &found.ID
-					holding = &found
 				case !errors.Is(err, gorm.ErrRecordNotFound):
 					return fmt.Errorf("failed to look up holding %s: %w", txn.Symbol, err)
 				}
 				if err := tx.Create(&dist).Error; err != nil {
 					return fmt.Errorf("failed to create distribution for %s on %s: %w", txn.Symbol, txn.Date.Format(fidelityDateLayout), err)
 				}
-				// The income is received now, so its tax treatment is settled
-				// now - the paying security's tax class decides whether it's
-				// ordinary, qualified-eligible, or exempt in each jurisdiction.
-				if err := applier.ApplyToDistribution(&dist, holding); err != nil {
-					return fmt.Errorf("failed to apply tax treatment for %s: %w", txn.Symbol, err)
+				// Derive the realized event and its tax treatments from the
+				// payment just recorded, exactly as a hand-entered distribution
+				// will - the import is just another way the source record arrives.
+				if err := portfolio.RealizeDistribution(tx, &dist, applier); err != nil {
+					return fmt.Errorf("failed to realize distribution for %s: %w", txn.Symbol, err)
 				}
 				result.Created++
 

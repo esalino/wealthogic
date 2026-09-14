@@ -1,7 +1,11 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { getGains, type TaxTreatment } from '../api/gains'
-import { getTaxSummary, type JurisdictionSummary } from '../api/tax'
+import {
+  getRealizedEvents,
+  getTaxSummary,
+  type JurisdictionSummary,
+  type TaxTreatment,
+} from '../api/tax'
 
 const PAGE_SIZES = [10, 20, 50]
 
@@ -109,6 +113,7 @@ function TreatmentBadge({ treatment }: { treatment: TaxTreatment }) {
 const CATEGORY_LABEL: Record<string, string> = {
   capital_gain: 'Capital gain',
   interest: 'Interest',
+  dividend: 'Dividend',
 }
 
 // Short forms so a row of badges stays readable; an unmapped character falls
@@ -164,11 +169,15 @@ function TablePagination({ page, setPage, total }: { page: Pagination; setPage: 
 
 export default function TaxCenter() {
   const [year, setYear] = useState(now.getUTCFullYear())
+  const [category, setCategory] = useState('')
   const [page, setPage] = useState<Pagination>({ pageIndex: 0, pageSize: 10 })
 
+  // Everything realized in the year, from both ledgers - capital gains,
+  // Treasury interest, and dividends alike. Fetching only gains here is what
+  // left income off the list while the jurisdiction cards still counted it.
   const { data, isLoading, isError } = useQuery({
-    queryKey: ['gains', year, page.pageIndex, page.pageSize],
-    queryFn: () => getGains(year, page.pageIndex + 1, page.pageSize),
+    queryKey: ['tax', 'events', year, category, page.pageIndex, page.pageSize],
+    queryFn: () => getRealizedEvents(year, page.pageIndex + 1, page.pageSize, { category }),
   })
 
   // Taxable income per jurisdiction, already bucketed and labeled by the API
@@ -180,6 +189,7 @@ export default function TaxCenter() {
   })
 
   const rows = data?.data ?? []
+  const summary = data?.summary ?? { total: 0, capital_gains: 0, interest: 0, dividends: 0 }
   const jurisdictions = taxData?.jurisdictions ?? []
 
   return (
@@ -221,10 +231,36 @@ export default function TaxCenter() {
         ))}
       </div>
 
-      {/* Realized gains table */}
+      {/* The realized ledger: one table now that disposals and income share it,
+          so a category filter is a plain query rather than a union. */}
       <div className="bg-surface-container-lowest rounded-xl shadow-card">
         <div className="px-6 py-4 border-b border-outline-variant">
-          <h2 className="text-headline-sm text-on-surface">Realized Income &amp; Gains</h2>
+          <div className="flex items-baseline justify-between gap-4 flex-wrap">
+            <h2 className="text-headline-sm text-on-surface">Realized Income &amp; Gains</h2>
+            <div className="flex items-center gap-2">
+              <select
+                value={category}
+                onChange={(e) => { setCategory(e.target.value); setPage({ pageIndex: 0, pageSize: page.pageSize }) }}
+                className="px-2 py-1 bg-surface-container-low border border-outline-variant rounded-lg text-label-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-secondary/30 focus:border-secondary transition-colors"
+              >
+                <option value="">All kinds</option>
+                {Object.entries(CATEGORY_LABEL).map(([value, lbl]) => (
+                  <option key={value} value={value}>{lbl}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+          {/* Totals by category, so this list visibly reconciles against the
+              jurisdiction cards above rather than appearing to fall short. */}
+          <div className="mt-2 flex items-baseline gap-3 text-label-sm text-on-surface-variant flex-wrap">
+              <span>Capital gains <span className="tabular-nums text-on-surface">{fmtCurrency(summary.capital_gains)}</span></span>
+              <span aria-hidden>·</span>
+              <span>Interest <span className="tabular-nums text-on-surface">{fmtCurrency(summary.interest)}</span></span>
+              <span aria-hidden>·</span>
+              <span>Dividends <span className="tabular-nums text-on-surface">{fmtCurrency(summary.dividends)}</span></span>
+              <span aria-hidden>·</span>
+              <span className="font-semibold">Total <span className="tabular-nums text-on-surface">{fmtCurrency(summary.total)}</span></span>
+          </div>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full">
@@ -240,17 +276,18 @@ export default function TaxCenter() {
             </thead>
             <tbody>
               {isLoading && (
-                <tr><td colSpan={6} className="px-6 py-10 text-center text-body-md text-on-surface-variant">Loading gains…</td></tr>
+                <tr><td colSpan={6} className="px-6 py-10 text-center text-body-md text-on-surface-variant">Loading realized income…</td></tr>
               )}
               {isError && (
-                <tr><td colSpan={6} className="px-6 py-10 text-center text-body-md text-error">Failed to load gains.</td></tr>
+                <tr><td colSpan={6} className="px-6 py-10 text-center text-body-md text-error">Failed to load realized income.</td></tr>
               )}
               {!isLoading && !isError && rows.length === 0 && (
                 <tr><td colSpan={6} className="px-6 py-10 text-center text-body-md text-on-surface-variant">No realized income or gains in {year}.</td></tr>
               )}
               {rows.map((g) => {
                 // Holding period only characterizes a capital gain - a Treasury's
-                // accreted discount is interest however long it was held.
+                // accreted discount is interest however long it was held, and
+                // income has no lot behind it at all.
                 const isCapital = g.category === 'capital_gain'
                 const long = g.term === 'long'
                 return (
@@ -264,7 +301,7 @@ export default function TaxCenter() {
                         <span className="text-label-sm text-on-surface-variant">{g.asset_type || '—'}</span>
                       </div>
                     </td>
-                    <td className="px-6 py-4 text-body-md text-on-surface-variant tabular-nums whitespace-nowrap">{fmtDate(g.realized_date)}</td>
+                    <td className="px-6 py-4 text-body-md text-on-surface-variant tabular-nums whitespace-nowrap">{fmtDate(g.event_date)}</td>
                     <td className="px-6 py-4">
                       <div className="flex items-center gap-2">
                         {isCapital && (
@@ -272,7 +309,13 @@ export default function TaxCenter() {
                             {long ? 'Long-term' : 'Short-term'}
                           </span>
                         )}
-                        <span className="text-label-sm text-on-surface-variant tabular-nums">{heldLabel(g.acquired_date, g.realized_date)}</span>
+                        {g.acquired_date ? (
+                          <span className="text-label-sm text-on-surface-variant tabular-nums">
+                            {heldLabel(g.acquired_date, g.event_date)}
+                          </span>
+                        ) : (
+                          <span className="text-label-sm text-on-surface-variant">—</span>
+                        )}
                       </div>
                     </td>
                     <td className="px-6 py-4">

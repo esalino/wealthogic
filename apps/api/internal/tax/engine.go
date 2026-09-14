@@ -8,12 +8,10 @@ import (
 	"gorm.io/gorm"
 )
 
-// Event is a realized money event reduced to the facts the rules care about.
-// Both Gain and Distribution map into it, so the engine never depends on either
-// ledger's shape.
+// Event is a realized money event reduced to the facts the rules care about,
+// so the engine depends on nothing but those facts.
 type Event struct {
-	SourceType string // models.TaxSourceGain | models.TaxSourceDistribution
-	SourceID   uuid.UUID
+	RealizedEventID uuid.UUID
 
 	IncomeType string  // models.IncomeType*
 	Amount     float64 // the realized gain/loss or the income paid
@@ -22,9 +20,7 @@ type Event struct {
 	AssetTaxClass      string // models.TaxClass*
 	IssuerJurisdiction string // "" when the asset has no issuing government
 
-	TaxYear   int
-	AccountID uuid.UUID
-	HoldingID *uuid.UUID
+	TaxYear int
 }
 
 // Context is everything an evaluation needs besides the event: who the taxpayer
@@ -102,12 +98,9 @@ func Evaluate(ev Event, ctx Context) []models.TaxTreatment {
 	treatments := make([]models.TaxTreatment, 0, len(ctx.JurisdictionCodes))
 	for _, code := range ctx.JurisdictionCodes {
 		t := models.TaxTreatment{
-			SourceType:       ev.SourceType,
-			SourceID:         ev.SourceID,
+			RealizedEventID:  ev.RealizedEventID,
 			JurisdictionCode: code,
 			TaxYear:          ev.TaxYear,
-			AccountID:        ev.AccountID,
-			HoldingID:        ev.HoldingID,
 		}
 
 		if sheltered {
