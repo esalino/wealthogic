@@ -304,6 +304,23 @@ func (h *fidelityTransactionsHandler) Process(db *gorm.DB, file io.Reader, opts 
 				case err != nil:
 					return fmt.Errorf("failed to look up holding %s: %w", txn.Symbol, err)
 				}
+
+				// A treasury has a quantity and a per-unit price like any other
+				// position, so it can be valued - but only if it has a price at
+				// all, and a holding created from a transaction has none until a
+				// positions file covers it. Seed it from the trade.
+				//
+				// Only for treasuries, and only as a fallback: a trade price is a
+				// historical fact, which for a bill converging to par is close
+				// enough to value the position, and for a volatile equity is not.
+				// A positions import always wins, so this never overrides one.
+				if *txn.AssetType == treasuryAssetType && holding.LastPrice == 0 {
+					if err := tx.Model(&holding).Update("last_price", *txn.Price).Error; err != nil {
+						return fmt.Errorf("failed to seed last price for %s: %w", txn.Symbol, err)
+					}
+					holding.LastPrice = *txn.Price
+				}
+
 				txn.HoldingID = &holding.ID
 				q := *txn.Quantity
 				txn.RemainingQuantity = &q

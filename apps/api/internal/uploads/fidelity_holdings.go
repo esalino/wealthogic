@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/eriksalino/wealthogic/api/internal/models"
+	"github.com/eriksalino/wealthogic/api/internal/portfolio"
 	"gorm.io/gorm"
 )
 
@@ -143,6 +144,17 @@ func (h *fidelityHoldingsHandler) Process(db *gorm.DB, file io.Reader, _ Options
 				return nil, fmt.Errorf("failed to update holding %s: %w", symbol, err)
 			}
 			result.Updated++
+		}
+
+		// A new price changes what the position is worth, and this file supplies
+		// the price without supplying the value - so the value has to be
+		// re-derived from the lots here, or it stays stale at whatever the last
+		// transaction import left. Skipped for value-only holdings, which have
+		// no lots and whose value came straight from the file above.
+		if !valueOnly {
+			if err := portfolio.RecalcHolding(db, &holding); err != nil {
+				return nil, fmt.Errorf("failed to recompute holding %s: %w", symbol, err)
+			}
 		}
 	}
 
