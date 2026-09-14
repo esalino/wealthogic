@@ -147,6 +147,10 @@ func DepleteLots(tx *gorm.DB, sell *models.Transaction, costBasisMethod string, 
 // (quantity, cost basis, current value, unrealized gain) from its open buy lots,
 // and realized gain from the Gain ledger. Dividend income isn't derived here yet.
 func RecalcHolding(tx *gorm.DB, holding *models.Holding) error {
+	// Open lots are the whole position. The transaction ledger is the only place
+	// a position is derived from, so a holding with no lots is genuinely empty
+	// here - which is how an un-imported transaction history makes itself
+	// visible, rather than being papered over with a stale figure.
 	var buys []models.Transaction
 	if err := tx.Where("holding_id = ? AND LOWER(action) = ? AND remaining_quantity > 0", holding.ID, "buy").Find(&buys).Error; err != nil {
 		return err

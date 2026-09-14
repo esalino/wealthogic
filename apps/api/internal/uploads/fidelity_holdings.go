@@ -17,6 +17,7 @@ import (
 const (
 	fidColSymbol       = 2
 	fidColDescription  = 3
+	fidColQuantity     = 4
 	fidColLastPrice    = 5
 	fidColCurrentValue = 7
 	fidMinColumns      = 16
@@ -87,11 +88,27 @@ func (h *fidelityHoldingsHandler) Process(db *gorm.DB, file io.Reader, _ Options
 		assetType := assetTypeFor(description)
 		lastPrice := parseDollar(record[fidColLastPrice])
 
-		// Cash-like holdings (e.g. money market) don't trade at a share
-		// price, so their value comes straight from the CSV's Current Value
-		// column instead of being derived from quantity * last price.
-		var currentValue float64
-		if assetType == cashAssetType {
+		// Treasuries are quoted per $100 of face value while quantity is the
+		// face value itself, so the raw price is off by a factor of 100 against
+		// every other holding. Rescale to a per-unit price here, matching what
+		// the transaction importer derives, or quantity * price overstates the
+		// position a hundredfold.
+		if assetType == treasuryAssetType {
+			lastPrice /= 100
+		}
+
+		// A row with no quantity has no share count a position could be derived
+		// from and never forms a tax lot - a money-market or cash balance. Its
+		// value can only come from the broker, so take it.
+		//
+		// Everything else deliberately takes nothing but its identity and price
+		// from this file: quantity, cost basis, and value come from the
+		// transaction ledger, which is the one place a position is actually
+		// derived. A holding left sitting at zero here is the signal that its
+		// transactions haven't been imported yet.
+		valueOnly := parseDollar(record[fidColQuantity]) == 0
+		currentValue := 0.0
+		if valueOnly {
 			currentValue = parseDollar(record[fidColCurrentValue])
 		}
 
@@ -116,7 +133,12 @@ func (h *fidelityHoldingsHandler) Process(db *gorm.DB, file io.Reader, _ Options
 			holding.AssetType = assetType
 			holding.Description = description
 			holding.LastPrice = lastPrice
-			holding.CurrentValue = currentValue
+			// Only a value-only holding's value comes from here; for anything
+			// else the transaction ledger owns it and must not be clobbered by
+			// a re-upload of the positions file.
+			if valueOnly {
+				holding.CurrentValue = currentValue
+			}
 			if err := db.Save(&holding).Error; err != nil {
 				return nil, fmt.Errorf("failed to update holding %s: %w", symbol, err)
 			}
