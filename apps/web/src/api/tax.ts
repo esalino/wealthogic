@@ -24,12 +24,31 @@ export interface TaxExclusion {
   amount: number
 }
 
+// A jurisdiction's capital gains after netting. The intermediate figures are
+// kept so the card can show the rule rather than just its result.
+export interface CapitalSummary {
+  short_term: number
+  long_term: number
+  // How much of one holding period's loss the other's gain absorbed.
+  offset: number
+  net: number
+  // What reaches taxable income: the net when it's a gain, zero when a loss.
+  taxable: number
+  // A net loss left over, as a positive number.
+  loss_carryforward: number
+}
+
 export interface JurisdictionSummary {
   code: string
   name: string
   level: string
+  // Capital and ordinary are separate because they're taxed separately: a
+  // capital loss nets against capital gains only, never against interest or
+  // dividends.
+  capital: CapitalSummary
+  ordinary: TaxBucket[]
+  ordinary_total: number
   taxable_total: number
-  buckets: TaxBucket[]
   excluded: TaxExclusion[]
 }
 

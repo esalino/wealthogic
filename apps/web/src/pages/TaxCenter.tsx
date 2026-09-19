@@ -38,19 +38,54 @@ function heldLabel(acquired: string, realized: string) {
   return `${d}d`
 }
 
-// Characters that represent a capital gain, which can be negative and so read
-// better signed and colored like a gain/loss than as a plain income amount.
-const SIGNED_CHARACTERS = new Set(['long_term_capital', 'short_term_capital'])
+// A line in a card. `signed` colors and signs the value like a gain/loss;
+// `muted` is for figures that inform without adding to the total.
+function Line({ label, value, signed, muted, indent, note }: {
+  label: string
+  value: number
+  signed?: boolean
+  muted?: boolean
+  indent?: boolean
+  note?: string
+}) {
+  const color = muted ? 'text-on-surface-variant' : signed ? gainColor(value) : 'text-on-surface'
+  return (
+    <div className="flex items-baseline justify-between py-2">
+      <p className={`text-body-md ${muted ? 'text-on-surface-variant' : 'text-on-surface'} ${indent ? 'pl-4' : ''}`}>
+        {label}
+        {note && <span className="text-label-sm text-on-surface-variant"> · {note}</span>}
+      </p>
+      <p className={`text-data-tabular font-semibold tabular-nums ${color}`}>
+        {signed ? fmtSigned(value) : fmtCurrency(value)}
+      </p>
+    </div>
+  )
+}
 
-// BucketCard renders one jurisdiction's taxable buckets, its total, and what it
-// excluded. Nothing about the card's shape is fixed: jurisdictions genuinely
-// differ - the U.S. splits capital gains by holding period while California
-// folds everything into ordinary income - so the buckets are whatever the API
-// reports, labels included.
+function SectionHeading({ title, total }: { title: string; total: number }) {
+  return (
+    <div className="flex items-baseline justify-between pt-3 pb-1">
+      <p className="text-label-caps text-on-surface-variant uppercase">{title}</p>
+      <p className="text-data-tabular font-bold tabular-nums text-on-surface">{fmtCurrency(total)}</p>
+    </div>
+  )
+}
+
+// BucketCard renders one jurisdiction: its capital gains after netting, its
+// ordinary income, and what it excluded.
+//
+// The two are shown apart because they are taxed apart - capital losses net
+// against capital gains only, and never reduce interest or dividends. Showing
+// one combined total was hiding a capital loss eating into interest income.
 function BucketCard({ jurisdiction, year }: { jurisdiction: JurisdictionSummary; year: number }) {
+  const cap = jurisdiction.capital
+  const hasCapital = cap.short_term !== 0 || cap.long_term !== 0
+  const hasOrdinary = jurisdiction.ordinary.length > 0
+  const carried = cap.loss_carryforward > 0
+
   return (
     <div className="bg-surface-container-lowest rounded-xl shadow-card p-6">
-      <div className="flex items-start justify-between mb-3">
+      <div className="flex items-start justify-between mb-2">
         <div>
           <h3 className="text-label-caps text-on-surface-variant uppercase">{jurisdiction.name}</h3>
           <p className="text-label-sm text-on-surface-variant">Taxable income for {year}</p>
@@ -62,27 +97,60 @@ function BucketCard({ jurisdiction, year }: { jurisdiction: JurisdictionSummary;
           </p>
         </div>
       </div>
+
       <div className="divide-y divide-outline-variant border-t border-outline-variant">
-        {jurisdiction.buckets.map((b) => {
-          const signed = SIGNED_CHARACTERS.has(b.character)
-          return (
-            <div key={b.character} className="flex items-baseline justify-between py-2.5">
-              <p className="text-body-md text-on-surface">{b.label}</p>
-              <p className={`text-data-tabular font-semibold tabular-nums ${signed ? gainColor(b.amount) : 'text-on-surface'}`}>
-                {signed ? fmtSigned(b.amount) : fmtCurrency(b.amount)}
-              </p>
+        {hasCapital && (
+          <div>
+            <SectionHeading title="Capital gains" total={cap.taxable} />
+            <Line label="Short-term" value={cap.short_term} signed indent />
+            <Line label="Long-term" value={cap.long_term} signed indent />
+            {cap.offset > 0 && (
+              <Line
+                label="Offset between periods"
+                value={-cap.offset}
+                muted
+                indent
+                note="loss applied to the other period's gain"
+              />
+            )}
+            <div className="border-t border-outline-variant/60">
+              <Line label="Net capital" value={cap.net} signed indent />
             </div>
-          )
-        })}
-        {jurisdiction.excluded.map((e) => (
-          <div key={e.reason} className="flex items-baseline justify-between py-2.5">
-            <p className="text-body-md text-on-surface-variant">Excluded — {e.label}</p>
-            <p className="text-data-tabular font-semibold tabular-nums text-on-surface-variant">
-              -{fmtCurrency(Math.abs(e.amount))}
-            </p>
+            {carried && (
+              <Line
+                label="Carried forward"
+                value={cap.loss_carryforward}
+                muted
+                indent
+                note="net loss, not deductible against income below"
+              />
+            )}
           </div>
-        ))}
-        {jurisdiction.buckets.length === 0 && jurisdiction.excluded.length === 0 && (
+        )}
+
+        {hasOrdinary && (
+          <div>
+            <SectionHeading title="Ordinary income" total={jurisdiction.ordinary_total} />
+            {jurisdiction.ordinary.map((b) => (
+              <Line key={b.character} label={b.label} value={b.amount} indent />
+            ))}
+          </div>
+        )}
+
+        {jurisdiction.excluded.length > 0 && (
+          <div className="pt-1">
+            {jurisdiction.excluded.map((e) => (
+              <div key={e.reason} className="flex items-baseline justify-between py-2">
+                <p className="text-body-md text-on-surface-variant">Excluded — {e.label}</p>
+                <p className="text-data-tabular font-semibold tabular-nums text-on-surface-variant">
+                  -{fmtCurrency(Math.abs(e.amount))}
+                </p>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {!hasCapital && !hasOrdinary && jurisdiction.excluded.length === 0 && (
           <p className="py-2.5 text-body-md text-on-surface-variant">No taxable activity.</p>
         )}
       </div>
@@ -90,9 +158,9 @@ function BucketCard({ jurisdiction, year }: { jurisdiction: JurisdictionSummary;
   )
 }
 
-// TreatmentBadge shows how one jurisdiction taxes a gain. Two badges on a row
-// that disagree - taxable federally, exempt at the state level - is the point:
-// the same event can land differently in each jurisdiction.
+// TreatmentBadge shows how one jurisdiction taxes a realized event. Two badges
+// on a row that disagree - taxable federally, exempt at the state level - is the
+// point: the same event can land differently in each jurisdiction.
 function TreatmentBadge({ treatment }: { treatment: TaxTreatment }) {
   const style = treatment.taxable
     ? 'bg-surface-container-high text-on-surface-variant'
@@ -108,14 +176,6 @@ function TreatmentBadge({ treatment }: { treatment: TaxTreatment }) {
   )
 }
 
-// What a realized row actually is. Not every disposal is a capital gain:
-// redeeming a Treasury realizes accreted discount, which is interest.
-const CATEGORY_LABEL: Record<string, string> = {
-  capital_gain: 'Capital gain',
-  interest: 'Interest',
-  dividend: 'Dividend',
-}
-
 // Short forms so a row of badges stays readable; an unmapped character falls
 // back to its raw value rather than being hidden.
 const CHARACTER_SHORT: Record<string, string> = {
@@ -125,6 +185,14 @@ const CHARACTER_SHORT: Record<string, string> = {
   ordinary: 'Ordinary',
   exempt: 'Exempt',
   deferred: 'Deferred',
+}
+
+// What a realized row actually is. Not every disposal is a capital gain:
+// redeeming a Treasury realizes accreted discount, which is interest.
+const CATEGORY_LABEL: Record<string, string> = {
+  capital_gain: 'Capital gain',
+  interest: 'Interest',
+  dividend: 'Dividend',
 }
 
 function TablePagination({ page, setPage, total }: { page: Pagination; setPage: (p: Pagination) => void; total: number }) {

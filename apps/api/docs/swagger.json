@@ -1437,6 +1437,32 @@
                 }
             }
         },
+        "CapitalSummary": {
+            "type": "object",
+            "properties": {
+                "long_term": {
+                    "type": "number"
+                },
+                "loss_carryforward": {
+                    "description": "LossCarryforward is a net loss left over, as a positive number.",
+                    "type": "number"
+                },
+                "net": {
+                    "type": "number"
+                },
+                "offset": {
+                    "description": "Offset is how much of one holding period's loss the other's gain absorbed.",
+                    "type": "number"
+                },
+                "short_term": {
+                    "type": "number"
+                },
+                "taxable": {
+                    "description": "Taxable is what reaches taxable income: the net when it's a gain, zero\nwhen it's a loss.",
+                    "type": "number"
+                }
+            }
+        },
         "CreateAccountRequest": {
             "type": "object",
             "required": [
@@ -1778,11 +1804,13 @@
         "JurisdictionSummary": {
             "type": "object",
             "properties": {
-                "buckets": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/TaxBucket"
-                    }
+                "capital": {
+                    "description": "Capital and Ordinary are reported apart because they are taxed apart: a\ncapital loss nets against capital gains only, never against interest or\ndividends.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/CapitalSummary"
+                        }
+                    ]
                 },
                 "code": {
                     "type": "string"
@@ -1798,6 +1826,15 @@
                 },
                 "name": {
                     "type": "string"
+                },
+                "ordinary": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/TaxBucket"
+                    }
+                },
+                "ordinary_total": {
+                    "type": "number"
                 },
                 "taxable_total": {
                     "type": "number"

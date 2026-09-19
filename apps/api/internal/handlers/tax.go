@@ -85,12 +85,34 @@ type taxExclusion struct {
 	Amount float64 `json:"amount"`
 } // @name TaxExclusion
 
+// capitalSummary is a jurisdiction's capital gains after netting, with the
+// intermediate figures kept so the rule is visible rather than implied.
+type capitalSummary struct {
+	ShortTerm float64 `json:"short_term"`
+	LongTerm  float64 `json:"long_term"`
+	// Offset is how much of one holding period's loss the other's gain absorbed.
+	Offset float64 `json:"offset"`
+	Net    float64 `json:"net"`
+	// Taxable is what reaches taxable income: the net when it's a gain, zero
+	// when it's a loss.
+	Taxable float64 `json:"taxable"`
+	// LossCarryforward is a net loss left over, as a positive number.
+	LossCarryforward float64 `json:"loss_carryforward"`
+} // @name CapitalSummary
+
 type jurisdictionSummary struct {
-	Code         string         `json:"code"`
-	Name         string         `json:"name"`
-	Level        string         `json:"level"`
+	Code  string `json:"code"`
+	Name  string `json:"name"`
+	Level string `json:"level"`
+
+	// Capital and Ordinary are reported apart because they are taxed apart: a
+	// capital loss nets against capital gains only, never against interest or
+	// dividends.
+	Capital       capitalSummary `json:"capital"`
+	Ordinary      []taxBucket    `json:"ordinary"`
+	OrdinaryTotal float64        `json:"ordinary_total"`
+
 	TaxableTotal float64        `json:"taxable_total"`
-	Buckets      []taxBucket    `json:"buckets"`
 	Excluded     []taxExclusion `json:"excluded"`
 } // @name JurisdictionSummary
 
@@ -108,10 +130,13 @@ type taxSummary struct {
 // @Failure      500   {object}  map[string]string
 // @Router       /tax/summary [get]
 //
-// The breakdown comes entirely from the stored treatments, so each jurisdiction
-// reports its own buckets: the U.S. splits capital gains by holding period while
-// California folds them into ordinary income, and neither shape is hardcoded
-// anywhere - a jurisdiction added as rule rows shows up here on its own.
+// The breakdown comes from the stored treatments, so each jurisdiction reports
+// its own buckets - the U.S. splits capital gains by holding period while
+// California folds them into ordinary rates, and neither shape is hardcoded.
+//
+// Capital gains are netted before they reach the total (see tax.CapitalPosition)
+// and ordinary income is added separately, because a capital loss cannot reduce
+// interest or dividends.
 func (h *taxHandler) GetSummary(c *gin.Context) {
 	year := time.Now().UTC().Year()
 	if y := c.Query("year"); y != "" {
@@ -120,17 +145,22 @@ func (h *taxHandler) GetSummary(c *gin.Context) {
 		}
 	}
 
-	// Taxable income grouped by jurisdiction and character.
-	var bucketRows []struct {
+	// Netting is decided by what the income IS, which lives on the event, not by
+	// the character it's taxed at - California taxes capital gains at ordinary
+	// rates while still netting them as capital.
+	var rows []struct {
 		JurisdictionCode string
+		Category         string
+		Term             string
 		TaxCharacter     string
 		Amount           float64
 	}
-	if err := h.db.Model(&models.TaxTreatment{}).
-		Select("jurisdiction_code, tax_character, COALESCE(SUM(taxable_amount), 0) AS amount").
-		Where("tax_year = ? AND taxable", year).
-		Group("jurisdiction_code, tax_character").
-		Scan(&bucketRows).Error; err != nil {
+	if err := h.db.Table("tax_treatments AS t").
+		Joins("JOIN realized_events AS e ON e.id = t.realized_event_id").
+		Select("t.jurisdiction_code, e.category, e.term, t.tax_character, COALESCE(SUM(t.taxable_amount), 0) AS amount").
+		Where("t.tax_year = ? AND t.taxable", year).
+		Group("t.jurisdiction_code, e.category, e.term, t.tax_character").
+		Scan(&rows).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to summarize tax treatments"})
 		return
 	}
@@ -156,54 +186,85 @@ func (h *taxHandler) GetSummary(c *gin.Context) {
 		return
 	}
 
-	byCode := map[string]*jurisdictionSummary{}
+	type accum struct {
+		summary  *jurisdictionSummary
+		capital  tax.CapitalPosition
+		ordinary map[string]float64
+		active   bool
+	}
+	byCode := map[string]*accum{}
 	for _, j := range jurisdictions {
-		byCode[j.Code] = &jurisdictionSummary{
-			Code:     j.Code,
-			Name:     j.Name,
-			Level:    j.Level,
-			Buckets:  []taxBucket{},
-			Excluded: []taxExclusion{},
+		byCode[j.Code] = &accum{
+			summary: &jurisdictionSummary{
+				Code: j.Code, Name: j.Name, Level: j.Level,
+				Ordinary: []taxBucket{}, Excluded: []taxExclusion{},
+			},
+			ordinary: map[string]float64{},
 		}
 	}
 
-	for _, r := range bucketRows {
-		js, ok := byCode[r.JurisdictionCode]
+	for _, r := range rows {
+		a, ok := byCode[r.JurisdictionCode]
 		if !ok {
 			continue
 		}
-		js.TaxableTotal += r.Amount
-		js.Buckets = append(js.Buckets, taxBucket{
-			Character: r.TaxCharacter,
-			Label:     label(characterLabels, r.TaxCharacter, "Other"),
-			Amount:    r.Amount,
-		})
+		a.active = true
+		if r.Category != models.IncomeTypeCapitalGain {
+			a.ordinary[r.TaxCharacter] += r.Amount
+			continue
+		}
+		if r.Term == "long" {
+			a.capital.LongTerm += r.Amount
+		} else {
+			a.capital.ShortTerm += r.Amount
+		}
 	}
 
 	for _, r := range exclusionRows {
-		js, ok := byCode[r.JurisdictionCode]
+		a, ok := byCode[r.JurisdictionCode]
 		if !ok || r.Amount == 0 {
 			continue
 		}
-		js.Excluded = append(js.Excluded, taxExclusion{
+		a.active = true
+		a.summary.Excluded = append(a.summary.Excluded, taxExclusion{
 			Reason: r.Reason,
 			Label:  label(reasonLabels, r.Reason, "Excluded"),
 			Amount: r.Amount,
 		})
 	}
 
-	// Only report jurisdictions that actually have activity this year, national
-	// level first so Federal reads before State.
+	// National level first, so Federal reads before State.
 	out := make([]jurisdictionSummary, 0, len(byCode))
 	for _, j := range jurisdictions {
-		js := byCode[j.Code]
-		if len(js.Buckets) == 0 && len(js.Excluded) == 0 {
+		a := byCode[j.Code]
+		if !a.active {
 			continue
 		}
-		sort.SliceStable(js.Buckets, func(a, b int) bool {
-			return characterOrder[js.Buckets[a].Character] < characterOrder[js.Buckets[b].Character]
+		js := a.summary
+
+		js.Capital = capitalSummary{
+			ShortTerm:        a.capital.ShortTerm,
+			LongTerm:         a.capital.LongTerm,
+			Offset:           a.capital.Offset(),
+			Net:              a.capital.Net(),
+			Taxable:          a.capital.Taxable(),
+			LossCarryforward: a.capital.LossCarryforward(),
+		}
+
+		for character, amount := range a.ordinary {
+			js.Ordinary = append(js.Ordinary, taxBucket{
+				Character: character,
+				Label:     label(characterLabels, character, "Other"),
+				Amount:    amount,
+			})
+			js.OrdinaryTotal += amount
+		}
+		sort.SliceStable(js.Ordinary, func(x, y int) bool {
+			return characterOrder[js.Ordinary[x].Character] < characterOrder[js.Ordinary[y].Character]
 		})
-		sort.SliceStable(js.Excluded, func(a, b int) bool { return js.Excluded[a].Amount > js.Excluded[b].Amount })
+		sort.SliceStable(js.Excluded, func(x, y int) bool { return js.Excluded[x].Amount > js.Excluded[y].Amount })
+
+		js.TaxableTotal = js.Capital.Taxable + js.OrdinaryTotal
 		out = append(out, *js)
 	}
 	sort.SliceStable(out, func(a, b int) bool {
