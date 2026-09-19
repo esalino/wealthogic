@@ -1,6 +1,7 @@
 package uploads
 
 import (
+	"context"
 	"encoding/csv"
 	"errors"
 	"fmt"
@@ -58,7 +59,7 @@ func assetTypeFor(description string) string {
 // upserts one Holding per symbol.
 type fidelityHoldingsHandler struct{}
 
-func (h *fidelityHoldingsHandler) Process(db *gorm.DB, file io.Reader, _ Options) (*Result, error) {
+func (h *fidelityHoldingsHandler) Process(db *gorm.DB, file io.Reader, opts Options) (*Result, error) {
 	reader := csv.NewReader(file)
 	// The export has a trailing disclaimer and footer rows with varying
 	// column counts, so don't enforce a fixed number of fields.
@@ -143,6 +144,7 @@ func (h *fidelityHoldingsHandler) Process(db *gorm.DB, file io.Reader, _ Options
 				return nil, fmt.Errorf("failed to create holding %s: %w", symbol, err)
 			}
 			result.Created++
+			opts.Enricher.EnrichQuietly(context.Background(), db, &holding)
 		case err != nil:
 			return nil, fmt.Errorf("failed to look up holding %s: %w", symbol, err)
 		default:

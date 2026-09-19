@@ -10,6 +10,7 @@ import {
   type TaxLot as ApiTaxLot,
 } from '../api/holdings'
 import { createTaxLot, getTaxLots, updateTaxLot } from '../api/taxLots'
+import { getAllocation, type AllocationSlice } from '../api/holdings'
 import { createTransaction, deleteTransaction, getTransactions, updateTransaction, type Transaction as ApiTransaction } from '../api/transactions'
 import { getDistributions } from '../api/distributions'
 import { getJurisdictions } from '../api/tax'
@@ -352,18 +353,27 @@ function SubPanel({ holding, activeTab, onTabChange, onAddLot, onEditLot, onAddT
   )
 }
 
-interface Sector {
-  label: string
-  pct: number
+// One colour per allocation slice, reused by the doughnut and its legend so the
+// two can't drift apart. Cycles if there are ever more slices than colours.
+const SLICE_COLORS = ['#091426', '#006c49', '#bcc7de', '#7a5900', '#8c4a60']
+
+function sliceColor(i: number) {
+  return SLICE_COLORS[i % SLICE_COLORS.length]
 }
 
-const sectors: Sector[] = [
-  { label: 'Technology', pct: 42.5 },
-  { label: 'Financial Services', pct: 18.2 },
-  { label: 'Healthcare', pct: 12.8 },
-  { label: 'Consumer Discretionary', pct: 10.5 },
-  { label: 'Others', pct: 16.0 },
-]
+// doughnutGradient turns the slices into a conic-gradient, each colour running
+// from where the previous one stopped.
+function doughnutGradient(slices: AllocationSlice[]): string {
+  if (slices.length === 0) return 'conic-gradient(var(--color-surface-container-high) 0% 100%)'
+  const stops: string[] = []
+  let at = 0
+  slices.forEach((slice, i) => {
+    const end = i === slices.length - 1 ? 100 : at + slice.percent
+    stops.push(`${sliceColor(i)} ${at}% ${end}%`)
+    at = end
+  })
+  return `conic-gradient(${stops.join(', ')})`
+}
 
 const ASSET_TYPES = ['Stock', 'ETF', 'Mutual Fund', 'Bond', 'Money Market', 'Crypto', 'Other']
 
@@ -1435,6 +1445,16 @@ export default function Portfolio() {
   }
 
   const holdings = data?.data ?? []
+  // Allocation covers the whole portfolio, so it has its own query rather than
+  // being derived from the table's current page.
+  const { data: allocationData } = useQuery({
+    queryKey: ['holdings', 'allocation'],
+    queryFn: getAllocation,
+  })
+  const allocation = allocationData?.asset_classes ?? []
+  const sectors = allocationData?.equity_sectors ?? []
+  const equityValue = allocationData?.equity_value ?? 0
+  const equityPct = allocationData?.equity_percent ?? 0
   // Allocation is computed relative to the market value of the holdings on the
   // current page — a stand-in until a portfolio-total endpoint exists.
   const totalMarketValue = holdings.reduce((sum, h) => sum + (h.current_value ?? 0), 0)
@@ -1471,20 +1491,15 @@ export default function Portfolio() {
             <h2 className="text-headline-sm text-on-surface mb-1">Asset Allocation</h2>
             <p className="text-body-md text-on-surface-variant mb-6">Portfolio composition by asset class</p>
 
-            {/* Doughnut chart */}
+            {/* Doughnut chart. The centre reads out equity, since "how much is
+                actually in stocks" is the question the split exists to answer. */}
             <div className="flex justify-center mb-6">
               <div className="relative w-48 h-48">
-                <div
-                  className="w-48 h-48 rounded-full"
-                  style={{
-                    background: 'conic-gradient(#091426 0% 65%, #006c49 65% 85%, #bcc7de 85% 100%)',
-                  }}
-                />
-                {/* White inner circle */}
+                <div className="w-48 h-48 rounded-full" style={{ background: doughnutGradient(allocation) }} />
                 <div className="absolute inset-0 flex items-center justify-center">
                   <div className="w-28 h-28 rounded-full bg-surface-container-lowest flex flex-col items-center justify-center">
-                    <span className="text-headline-sm text-on-surface font-bold">65%</span>
-                    <span className="text-label-caps text-on-surface-variant uppercase">STOCKS</span>
+                    <span className="text-headline-sm text-on-surface font-bold">{equityPct.toFixed(1)}%</span>
+                    <span className="text-label-caps text-on-surface-variant uppercase">Equity</span>
                   </div>
                 </div>
               </div>
@@ -1492,19 +1507,22 @@ export default function Portfolio() {
 
             {/* Legend */}
             <div className="space-y-3">
-              {[
-                { label: 'Stocks', value: '$1.61M', color: 'bg-primary', pct: '65%' },
-                { label: 'Bonds', value: '$496k', color: 'bg-secondary', pct: '20%' },
-                { label: 'Cash', value: '$372k', color: 'bg-primary-fixed-dim', pct: '15%' },
-              ].map((item) => (
-                <div key={item.label} className="flex items-center justify-between">
+              {allocation.length === 0 && (
+                <p className="text-body-md text-on-surface-variant">No valued holdings yet.</p>
+              )}
+              {allocation.map((slice, i) => (
+                <div key={slice.label} className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
-                    <div className={`w-3 h-3 rounded-full ${item.color}`} />
-                    <span className="text-body-md text-on-surface">{item.label}</span>
+                    <div className="w-3 h-3 rounded-full" style={{ backgroundColor: sliceColor(i) }} />
+                    <span className="text-body-md text-on-surface">{slice.label}</span>
                   </div>
                   <div className="flex items-center gap-4">
-                    <span className="text-body-md font-semibold text-on-surface tabular-nums">{item.value}</span>
-                    <span className="text-label-sm text-on-surface-variant w-8 text-right">{item.pct}</span>
+                    <span className="text-body-md font-semibold text-on-surface tabular-nums">
+                      {fmtCurrency(slice.value)}
+                    </span>
+                    <span className="text-label-sm text-on-surface-variant w-12 text-right tabular-nums">
+                      {slice.percent.toFixed(1)}%
+                    </span>
                   </div>
                 </div>
               ))}
@@ -1514,20 +1532,29 @@ export default function Portfolio() {
           {/* Sector Exposure */}
           <div className="col-span-12 lg:col-span-7 bg-surface-container-lowest rounded-xl shadow-card p-6">
             <h2 className="text-headline-sm text-on-surface mb-1">Sector Exposure</h2>
-            <p className="text-body-md text-on-surface-variant mb-6">Allocation by market sector</p>
+            <p className="text-body-md text-on-surface-variant mb-6">
+              Within equities only — {fmtCurrency(equityValue)}
+              {equityPct > 0 && <span> · {equityPct.toFixed(1)}% of the portfolio</span>}
+            </p>
 
             <div className="space-y-5">
+              {sectors.length === 0 && (
+                <p className="text-body-md text-on-surface-variant">No equity holdings with a value yet.</p>
+              )}
               {sectors.map((sector, i) => (
                 <div key={sector.label}>
                   <div className="flex justify-between mb-1.5">
                     <span className="text-body-md text-on-surface">{sector.label}</span>
-                    <span className="text-body-md font-semibold text-on-surface tabular-nums">{sector.pct}%</span>
+                    <span className="text-body-md text-on-surface-variant tabular-nums">
+                      {fmtCurrency(sector.value)}
+                      <span className="ml-3 font-semibold text-on-surface">{sector.percent.toFixed(1)}%</span>
+                    </span>
                   </div>
                   <div className="w-full bg-surface-container-high rounded-full h-2">
                     <div
                       className="h-2 rounded-full bg-primary transition-all duration-700 ease-out"
                       style={{
-                        width: mounted ? `${sector.pct}%` : '0%',
+                        width: mounted ? `${sector.percent}%` : '0%',
                         transitionDelay: `${i * 80}ms`,
                       }}
                     />

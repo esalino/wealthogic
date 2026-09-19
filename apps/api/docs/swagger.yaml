@@ -27,6 +27,36 @@ definitions:
       updated_at:
         type: string
     type: object
+  AllocationSlice:
+    properties:
+      label:
+        type: string
+      percent:
+        type: number
+      value:
+        type: number
+    type: object
+  AllocationSummary:
+    properties:
+      asset_classes:
+        description: |-
+          AssetClasses splits the whole portfolio; EquitySectors splits the equity
+          part of it and is weighted within that, since a sector describes a company
+          and means nothing for cash or a government bond.
+        items:
+          $ref: '#/definitions/AllocationSlice'
+        type: array
+      equity_percent:
+        type: number
+      equity_sectors:
+        items:
+          $ref: '#/definitions/AllocationSlice'
+        type: array
+      equity_value:
+        type: number
+      total_value:
+        type: number
+    type: object
   CapitalSummary:
     properties:
       long_term:
@@ -230,10 +260,18 @@ definitions:
     type: object
   Holding:
     properties:
+      asset_class:
+        type: string
       asset_type:
         type: string
       average_cost_basis:
         type: number
+      company_name:
+        description: |-
+          Reference data about the security, from a market-data provider. Purely
+          descriptive - nothing in the portfolio or tax math reads it - so it is
+          filled in when it can be and left empty when it can't.
+        type: string
       contract_multiplier:
         description: |-
           ContractMultiplier is how many shares one unit of this holding covers -
@@ -242,6 +280,8 @@ definitions:
         type: number
       cost_basis_total:
         type: number
+      country:
+        type: string
       created_at:
         type: string
       current_value:
@@ -250,6 +290,8 @@ definitions:
         type: string
       dividend_income:
         type: number
+      exchange:
+        type: string
       expiration_date:
         type: string
       gain_realized_amount:
@@ -262,6 +304,8 @@ definitions:
         type: number
       id:
         type: string
+      industry:
+        type: string
       issuer_jurisdiction:
         description: |-
           IssuerJurisdiction is the government that issued this asset's debt, for
@@ -271,11 +315,21 @@ definitions:
         type: string
       last_price:
         type: number
+      logo_url:
+        type: string
       option_type:
         description: '"call" | "put"'
         type: string
+      profile_fetched_at:
+        description: |-
+          ProfileFetchedAt records that a lookup happened, whether or not it found
+          anything. Without it a symbol the provider doesn't cover - a treasury
+          CUSIP, an option contract - would be retried on every pass forever.
+        type: string
       purchase_quantity:
         type: number
+      sector:
+        type: string
       status:
         type: string
       strike_price:
@@ -285,7 +339,8 @@ definitions:
       tax_class:
         description: |-
           TaxClass is the resolved class (override, else the asset-type default),
-          computed for responses via AfterFind and never persisted.
+          computed for responses via AfterFind and never persisted. AssetClass is
+          the allocation slice it implies.
         type: string
       tax_class_override:
         description: |-
@@ -300,6 +355,8 @@ definitions:
           Nil/empty for everything else.
         type: string
       updated_at:
+        type: string
+      website:
         type: string
     type: object
   JurisdictionSummary:
@@ -956,6 +1013,17 @@ definitions:
       updated_at:
         type: string
     type: object
+  marketdata.BackfillResult:
+    properties:
+      considered:
+        type: integer
+      enriched:
+        type: integer
+      failed:
+        type: integer
+      not_found:
+        type: integer
+    type: object
 host: localhost:8080
 info:
   contact: {}
@@ -1274,6 +1342,48 @@ paths:
               type: string
             type: object
       summary: Update an existing holding
+      tags:
+      - holdings
+  /holdings/allocation:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/AllocationSummary'
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Portfolio allocation by asset class, and sector within equities
+      tags:
+      - holdings
+  /holdings/backfill-profiles:
+    post:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/marketdata.BackfillResult'
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "503":
+          description: Service Unavailable
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Look up reference data for holdings that don't have it yet
       tags:
       - holdings
   /tax-lots:

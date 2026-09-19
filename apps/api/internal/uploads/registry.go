@@ -4,6 +4,7 @@ import (
 	"io"
 	"strings"
 
+	"github.com/eriksalino/wealthogic/api/internal/marketdata"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
@@ -24,6 +25,11 @@ type Result struct {
 type Options struct {
 	AccountID uuid.UUID
 	FileName  string
+
+	// Enricher fills in reference data for holdings the import creates. Nil is
+	// fine and means the detail is simply skipped - an import must not depend
+	// on an external provider being reachable.
+	Enricher *marketdata.Enricher
 }
 
 // FileHandler processes an uploaded file into database records.

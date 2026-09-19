@@ -78,6 +78,29 @@ type Holding struct {
 	// are per share, so every basis and proceeds figure scales by it.
 	ContractMultiplier float64 `gorm:"not null;default:1" json:"contract_multiplier"`
 
+	// Reference data about the security, from a market-data provider. Purely
+	// descriptive - nothing in the portfolio or tax math reads it - so it is
+	// filled in when it can be and left empty when it can't.
+	CompanyName string `json:"company_name"`
+
+	// CompanyDescription is the provider's prose summary of the business. It's
+	// stored but not serialized: it runs to several paragraphs, and sending it
+	// with every row of a holdings list would cost far more than it's worth
+	// while nothing reads it. Drop the "-" tag to expose it.
+	CompanyDescription string `gorm:"type:text" json:"-"`
+
+	Sector   string `gorm:"index" json:"sector"`
+	Industry string `gorm:"index" json:"industry"`
+	Exchange string `json:"exchange"`
+	Country  string `gorm:"size:8" json:"country"`
+	Website  string `json:"website"`
+	LogoURL  string `json:"logo_url"`
+
+	// ProfileFetchedAt records that a lookup happened, whether or not it found
+	// anything. Without it a symbol the provider doesn't cover - a treasury
+	// CUSIP, an option contract - would be retried on every pass forever.
+	ProfileFetchedAt *time.Time `json:"profile_fetched_at"`
+
 	Status string `gorm:"not null;default:Open" json:"status"`
 
 	LastPrice float64 `json:"last_price"`
@@ -108,8 +131,10 @@ type Holding struct {
 	IssuerJurisdiction *string `gorm:"size:16" json:"issuer_jurisdiction"`
 
 	// TaxClass is the resolved class (override, else the asset-type default),
-	// computed for responses via AfterFind and never persisted.
-	TaxClass string `gorm:"-" json:"tax_class"`
+	// computed for responses via AfterFind and never persisted. AssetClass is
+	// the allocation slice it implies.
+	TaxClass   string `gorm:"-" json:"tax_class"`
+	AssetClass string `gorm:"-" json:"asset_class"`
 } // @name Holding
 
 // Multiplier is the shares one unit of this holding covers, defaulting to 1 for
@@ -142,8 +167,64 @@ func (h Holding) ResolveIssuerJurisdiction() string {
 	return ""
 }
 
-// AfterFind populates the computed TaxClass field whenever a holding is read.
+// Asset classes: the top level of an allocation, above sector.
+//
+// Sector only means something within equities - a Treasury has no sector, and a
+// money-market fund's provider-assigned "Financial Services" describes the fund
+// company rather than the exposure. Splitting by class first is what makes the
+// equity slice legible instead of buried under cash and bonds.
+const (
+	AssetClassEquity      = "Equity"
+	AssetClassFixedIncome = "Fixed Income"
+	AssetClassCash        = "Cash"
+	AssetClassDerivatives = "Derivatives"
+	AssetClassOther       = "Other"
+)
+
+// ResolveAssetClass reports which slice of an allocation this holding belongs
+// to, derived from its tax class rather than a field of its own.
+//
+// The tax class already carries the distinction and is correctable per holding,
+// so a Treasury-only ETF classed as government_bond lands in Fixed Income
+// rather than Equity - which is what it is, whatever its wrapper.
+func (h Holding) ResolveAssetClass() string {
+	// An option's tax class is "other"; the asset type is what identifies it.
+	if h.AssetType == AssetTypeOption {
+		return AssetClassDerivatives
+	}
+	switch h.ResolveTaxClass() {
+	case TaxClassEquity:
+		return AssetClassEquity
+	case TaxClassGovernmentBond, TaxClassMunicipalBond, TaxClassCorporateBond:
+		return AssetClassFixedIncome
+	case TaxClassMoneyMarket:
+		return AssetClassCash
+	}
+	return AssetClassOther
+}
+
+// WantsProfile reports whether it's worth asking a market-data provider about
+// this holding.
+//
+// Only securities with an issuer behind them have a profile: an option is a
+// contract rather than a company, and a treasury is government debt identified
+// by CUSIP. Asking anyway costs a rate-limited call to be told nothing.
+func (h Holding) WantsProfile() bool {
+	if h.Symbol == "" || h.ProfileFetchedAt != nil {
+		return false
+	}
+	if h.AssetType == AssetTypeOption || h.AssetType == AssetTypeTreasury {
+		return false
+	}
+	if _, isOption := ParseOptionSymbol(h.Symbol); isOption {
+		return false
+	}
+	return true
+}
+
+// AfterFind populates the computed fields whenever a holding is read.
 func (h *Holding) AfterFind(*gorm.DB) error {
 	h.TaxClass = h.ResolveTaxClass()
+	h.AssetClass = h.ResolveAssetClass()
 	return nil
 }

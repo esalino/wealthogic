@@ -13,6 +13,7 @@ import (
 	_ "github.com/eriksalino/wealthogic/api/docs"
 	"github.com/eriksalino/wealthogic/api/internal/db"
 	"github.com/eriksalino/wealthogic/api/internal/handlers"
+	"github.com/eriksalino/wealthogic/api/internal/marketdata"
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
@@ -30,13 +31,21 @@ func main() {
 		log.Fatalf("failed to connect to database: %v", err)
 	}
 
+	// Reference data (sector, industry) comes from a market-data provider. With
+	// no key configured the enricher is nil and every call through it is a
+	// no-op, so the app runs unchanged without one.
+	enricher := marketdata.NewEnricher(marketdata.NewFMPClient(os.Getenv("FMP_API_KEY")))
+	if !enricher.Enabled() {
+		log.Println("market data: FMP_API_KEY not set, holding profiles will not be fetched")
+	}
+
 	accountHandler := handlers.NewAccountHandler(database)
-	holdingHandler := handlers.NewHoldingHandler(database)
+	holdingHandler := handlers.NewHoldingHandler(database, enricher)
 	taxLotHandler := handlers.NewTaxLotHandler(database)
 	transactionHandler := handlers.NewTransactionHandler(database)
 	distributionHandler := handlers.NewDistributionHandler(database)
 	userHandler := handlers.NewUserHandler(database)
-	uploadHandler := handlers.NewUploadHandler(database)
+	uploadHandler := handlers.NewUploadHandler(database, enricher)
 	taxHandler := handlers.NewTaxHandler(database)
 
 	r := gin.Default()
@@ -62,6 +71,8 @@ func main() {
 	r.GET("/holdings", holdingHandler.GetHoldings)
 	r.POST("/holdings", holdingHandler.CreateHolding)
 	r.PATCH("/holdings/:id", holdingHandler.UpdateHolding)
+	r.GET("/holdings/allocation", holdingHandler.GetAllocation)
+	r.POST("/holdings/backfill-profiles", holdingHandler.BackfillProfiles)
 	r.GET("/tax-lots", taxLotHandler.GetTaxLots)
 	r.POST("/tax-lots", taxLotHandler.CreateTaxLot)
 	r.PATCH("/tax-lots/:id", taxLotHandler.UpdateTaxLot)

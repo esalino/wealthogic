@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/eriksalino/wealthogic/api/internal/marketdata"
 	"github.com/eriksalino/wealthogic/api/internal/models"
 	"github.com/eriksalino/wealthogic/api/internal/uploads"
 	"github.com/gin-gonic/gin"
@@ -20,10 +21,11 @@ type UploadHandler interface {
 type uploadHandler struct {
 	db       *gorm.DB
 	registry *uploads.Registry
+	enricher *marketdata.Enricher
 }
 
-func NewUploadHandler(db *gorm.DB) UploadHandler {
-	return &uploadHandler{db: db, registry: uploads.NewRegistry()}
+func NewUploadHandler(db *gorm.DB, enricher *marketdata.Enricher) UploadHandler {
+	return &uploadHandler{db: db, registry: uploads.NewRegistry(), enricher: enricher}
 }
 
 // Upload godoc
@@ -60,7 +62,7 @@ func (h *uploadHandler) Upload(c *gin.Context) {
 		return
 	}
 
-	var opts uploads.Options
+	opts := uploads.Options{Enricher: h.enricher}
 	if accountID := c.PostForm("account_id"); accountID != "" {
 		id, err := uuid.Parse(accountID)
 		if err != nil {

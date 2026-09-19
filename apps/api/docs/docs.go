@@ -426,6 +426,71 @@ const docTemplate = `{
                 }
             }
         },
+        "/holdings/allocation": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "holdings"
+                ],
+                "summary": "Portfolio allocation by asset class, and sector within equities",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/AllocationSummary"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/holdings/backfill-profiles": {
+            "post": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "holdings"
+                ],
+                "summary": "Look up reference data for holdings that don't have it yet",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/marketdata.BackfillResult"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/holdings/{id}": {
             "patch": {
                 "consumes": [
@@ -1443,6 +1508,47 @@ const docTemplate = `{
                 }
             }
         },
+        "AllocationSlice": {
+            "type": "object",
+            "properties": {
+                "label": {
+                    "type": "string"
+                },
+                "percent": {
+                    "type": "number"
+                },
+                "value": {
+                    "type": "number"
+                }
+            }
+        },
+        "AllocationSummary": {
+            "type": "object",
+            "properties": {
+                "asset_classes": {
+                    "description": "AssetClasses splits the whole portfolio; EquitySectors splits the equity\npart of it and is weighted within that, since a sector describes a company\nand means nothing for cash or a government bond.",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/AllocationSlice"
+                    }
+                },
+                "equity_percent": {
+                    "type": "number"
+                },
+                "equity_sectors": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/AllocationSlice"
+                    }
+                },
+                "equity_value": {
+                    "type": "number"
+                },
+                "total_value": {
+                    "type": "number"
+                }
+            }
+        },
         "CapitalSummary": {
             "type": "object",
             "properties": {
@@ -1724,11 +1830,18 @@ const docTemplate = `{
         "Holding": {
             "type": "object",
             "properties": {
+                "asset_class": {
+                    "type": "string"
+                },
                 "asset_type": {
                     "type": "string"
                 },
                 "average_cost_basis": {
                     "type": "number"
+                },
+                "company_name": {
+                    "description": "Reference data about the security, from a market-data provider. Purely\ndescriptive - nothing in the portfolio or tax math reads it - so it is\nfilled in when it can be and left empty when it can't.",
+                    "type": "string"
                 },
                 "contract_multiplier": {
                     "description": "ContractMultiplier is how many shares one unit of this holding covers -\n100 for a standard option contract, 1 for everything else. Quoted prices\nare per share, so every basis and proceeds figure scales by it.",
@@ -1736,6 +1849,9 @@ const docTemplate = `{
                 },
                 "cost_basis_total": {
                     "type": "number"
+                },
+                "country": {
+                    "type": "string"
                 },
                 "created_at": {
                     "type": "string"
@@ -1748,6 +1864,9 @@ const docTemplate = `{
                 },
                 "dividend_income": {
                     "type": "number"
+                },
+                "exchange": {
+                    "type": "string"
                 },
                 "expiration_date": {
                     "type": "string"
@@ -1767,6 +1886,9 @@ const docTemplate = `{
                 "id": {
                     "type": "string"
                 },
+                "industry": {
+                    "type": "string"
+                },
                 "issuer_jurisdiction": {
                     "description": "IssuerJurisdiction is the government that issued this asset's debt, for\nthe bond classes. It's what the tax rules compare against a jurisdiction\nto decide questions like \"did my own state issue this?\" - nil means the\nasset-type default (see defaultIssuerJurisdiction).",
                     "type": "string"
@@ -1774,12 +1896,22 @@ const docTemplate = `{
                 "last_price": {
                     "type": "number"
                 },
+                "logo_url": {
+                    "type": "string"
+                },
                 "option_type": {
                     "description": "\"call\" | \"put\"",
                     "type": "string"
                 },
+                "profile_fetched_at": {
+                    "description": "ProfileFetchedAt records that a lookup happened, whether or not it found\nanything. Without it a symbol the provider doesn't cover - a treasury\nCUSIP, an option contract - would be retried on every pass forever.",
+                    "type": "string"
+                },
                 "purchase_quantity": {
                     "type": "number"
+                },
+                "sector": {
+                    "type": "string"
                 },
                 "status": {
                     "type": "string"
@@ -1791,7 +1923,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "tax_class": {
-                    "description": "TaxClass is the resolved class (override, else the asset-type default),\ncomputed for responses via AfterFind and never persisted.",
+                    "description": "TaxClass is the resolved class (override, else the asset-type default),\ncomputed for responses via AfterFind and never persisted. AssetClass is\nthe allocation slice it implies.",
                     "type": "string"
                 },
                 "tax_class_override": {
@@ -1803,6 +1935,9 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "updated_at": {
+                    "type": "string"
+                },
+                "website": {
                     "type": "string"
                 }
             }
@@ -2678,6 +2813,23 @@ const docTemplate = `{
                 },
                 "updated_at": {
                     "type": "string"
+                }
+            }
+        },
+        "marketdata.BackfillResult": {
+            "type": "object",
+            "properties": {
+                "considered": {
+                    "type": "integer"
+                },
+                "enriched": {
+                    "type": "integer"
+                },
+                "failed": {
+                    "type": "integer"
+                },
+                "not_found": {
+                    "type": "integer"
                 }
             }
         }

@@ -1,6 +1,7 @@
 package uploads
 
 import (
+	"context"
 	"encoding/csv"
 	"errors"
 	"fmt"
@@ -271,6 +272,11 @@ func (h *fidelityTransactionsHandler) Process(db *gorm.DB, file io.Reader, opts 
 
 	// The whole batch is wrapped in a transaction so a bad row doesn't leave a
 	// partially imported file.
+	// Holdings this file brings into existence. Their reference data is fetched
+	// after the import commits, so a slow provider can't hold a database
+	// transaction open.
+	var newHoldings []uuid.UUID
+
 	err := db.Transaction(func(tx *gorm.DB) error {
 		// Log the import itself; every row's UploadTransaction links to it.
 		upload := models.Upload{
@@ -395,6 +401,7 @@ func (h *fidelityTransactionsHandler) Process(db *gorm.DB, file io.Reader, opts 
 					if err := tx.Create(&holding).Error; err != nil {
 						return fmt.Errorf("failed to create holding %s: %w", txn.Symbol, err)
 					}
+					newHoldings = append(newHoldings, holding.ID)
 				case err != nil:
 					return fmt.Errorf("failed to look up holding %s: %w", txn.Symbol, err)
 				}
@@ -499,6 +506,18 @@ func (h *fidelityTransactionsHandler) Process(db *gorm.DB, file io.Reader, opts 
 	})
 	if err != nil {
 		return nil, err
+	}
+
+	// Outside the transaction: these are network calls, and the import is
+	// already durable without them.
+	if opts.Enricher.Enabled() {
+		for _, id := range newHoldings {
+			var holding models.Holding
+			if err := db.First(&holding, "id = ?", id).Error; err != nil {
+				continue
+			}
+			opts.Enricher.EnrichQuietly(context.Background(), db, &holding)
+		}
 	}
 
 	return result, nil

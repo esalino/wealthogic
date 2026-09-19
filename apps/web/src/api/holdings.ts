@@ -34,6 +34,18 @@ export interface Holding {
   asset_type: string
   symbol: string
   description: string
+
+  // Reference data from a market-data provider. Descriptive only, and empty
+  // when the provider has no record of the symbol (a Treasury CUSIP, an option
+  // contract) or when no API key is configured.
+  company_name: string
+  sector: string
+  industry: string
+  exchange: string
+  country: string
+  website: string
+  logo_url: string
+  profile_fetched_at: string | null
   status: string
   last_price: number
   purchase_quantity: number
@@ -52,6 +64,9 @@ export interface Holding {
   issuer_jurisdiction: string | null
   // Resolved class (override, else asset-type default). Read-only.
   tax_class: string
+  // The allocation slice the tax class implies: Equity, Fixed Income, Cash,
+  // Derivatives, Other. Read-only.
+  asset_class: string
   created_at: string
   updated_at: string
 }
@@ -117,6 +132,37 @@ export async function updateHolding(id: string, payload: UpdateHoldingPayload): 
   if (!res.ok) {
     const err = await res.json().catch(() => ({}))
     throw new Error(err.error ?? 'Failed to update holding')
+  }
+
+  return res.json()
+}
+
+// One wedge of an allocation breakdown.
+export interface AllocationSlice {
+  label: string
+  value: number
+  percent: number
+}
+
+// Computed over every holding, not a page of them: an allocation drawn from
+// whatever rows a table happens to be showing describes the page rather than
+// the portfolio.
+export interface AllocationSummary {
+  total_value: number
+  asset_classes: AllocationSlice[]
+  equity_value: number
+  equity_percent: number
+  // Weighted within equities, since a sector describes a company and means
+  // nothing for cash or a government bond.
+  equity_sectors: AllocationSlice[]
+}
+
+export async function getAllocation(): Promise<AllocationSummary> {
+  const res = await fetch(`${API_BASE}/holdings/allocation`)
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.error ?? 'Failed to fetch allocation')
   }
 
   return res.json()
