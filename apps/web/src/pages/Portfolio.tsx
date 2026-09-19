@@ -198,32 +198,59 @@ function SubPanel({ holding, activeTab, onTabChange, onAddLot, onEditLot, onAddT
                   <th className="px-4 py-2 text-right">Remaining</th>
                   <th className="px-4 py-2 text-right">Purchase Price</th>
                   <th className="px-4 py-2 text-right">Cost Basis</th>
+                  <th className="px-4 py-2 text-right">Market Value</th>
+                  <th className="px-4 py-2 text-right">Unrealized</th>
                   <th className="px-4 py-2 w-10" />
                 </tr>
               </thead>
               <tbody className="divide-y divide-outline-variant">
                 {lotsLoading && (
                   <tr>
-                    <td colSpan={6} className="px-4 py-6 text-center text-body-sm text-on-surface-variant">Loading tax lots…</td>
+                    <td colSpan={8} className="px-4 py-6 text-center text-body-sm text-on-surface-variant">Loading tax lots…</td>
                   </tr>
                 )}
                 {!lotsLoading && lots.length === 0 && (
                   <tr>
-                    <td colSpan={6} className="px-4 py-6 text-center text-body-sm text-on-surface-variant">No tax lots yet.</td>
+                    <td colSpan={8} className="px-4 py-6 text-center text-body-sm text-on-surface-variant">No tax lots yet.</td>
                   </tr>
                 )}
                 {!lotsLoading && lots.map((lot) => {
                   const closed = lot.remaining_quantity <= 0
+                  const short = lot.direction === 'short'
+                  // Unpriced lots report null rather than zero, so show that
+                  // they're unknown instead of implying a total loss.
+                  const unrealized = lot.gain_unrealized_amount
+                  const gainCls = unrealized == null
+                    ? 'text-on-surface-variant'
+                    : gainColor(unrealized > 0 ? 'positive' : unrealized < 0 ? 'negative' : 'neutral')
                   return (
                     <tr key={lot.id} className={`text-data-tabular text-on-surface tabular-nums ${closed ? 'opacity-50' : ''}`}>
                       <td className="px-4 py-3">{fmtDate(lot.purchase_date)}</td>
                       <td className="px-4 py-3 text-right">{fmtNumber(lot.purchase_quantity)}</td>
                       <td className="px-4 py-3 text-right">
                         {fmtNumber(lot.remaining_quantity)}
+                        {short && <span className="ml-2 text-[10px] font-bold text-on-surface-variant uppercase">Short</span>}
                         {closed && <span className="ml-2 text-[10px] font-bold text-on-surface-variant uppercase">Closed</span>}
                       </td>
                       <td className="px-4 py-3 text-right">{fmtCurrency(lot.purchase_price)}</td>
-                      <td className="px-4 py-3 text-right">{fmtCurrency(lot.remaining_quantity * lot.purchase_price)}</td>
+                      <td className="px-4 py-3 text-right">{fmtCurrency(lot.cost_basis)}</td>
+                      <td className="px-4 py-3 text-right">
+                        {lot.market_value == null
+                          ? <span className="text-on-surface-variant">—</span>
+                          : fmtCurrency(lot.market_value)}
+                      </td>
+                      <td className={`px-4 py-3 text-right ${gainCls}`}>
+                        {unrealized == null ? (
+                          <span title="No current price for this holding yet">—</span>
+                        ) : (
+                          <>
+                            <div className="font-semibold">{fmtSignedCurrency(unrealized)}</div>
+                            {lot.gain_unrealized_percent != null && (
+                              <div className="text-label-sm">{fmtPercent(lot.gain_unrealized_percent)}</div>
+                            )}
+                          </>
+                        )}
+                      </td>
                       <td className="px-4 py-3 text-right w-10">
                         <RowMenu onEdit={() => onEditLot(lot)} />
                       </td>

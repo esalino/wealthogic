@@ -13,6 +13,20 @@ export interface TaxLot {
   account_id: string
   created_at: string
   updated_at: string
+
+  // 'long' | 'short'. A written option's lot took premium in rather than paying
+  // it out, so its cost basis and value carry the opposite sign.
+  direction: string
+  // Shares one unit covers: 100 for an option contract, 1 otherwise.
+  contract_multiplier: number
+  // From the holding, which is the one place a current price lives.
+  last_price: number
+  // The open part of the lot at its opening price, fees included.
+  cost_basis: number
+  // Null when the holding has no price - an unpriced lot is unknown, not zero.
+  market_value: number | null
+  gain_unrealized_amount: number | null
+  gain_unrealized_percent: number | null
 }
 
 export interface Holding {

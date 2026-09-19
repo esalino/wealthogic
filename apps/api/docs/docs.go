@@ -2135,14 +2135,38 @@ const docTemplate = `{
                 "asset_type": {
                     "type": "string"
                 },
+                "contract_multiplier": {
+                    "type": "number"
+                },
+                "cost_basis": {
+                    "description": "CostBasis is the open part of the lot at its opening price, commission\nand fees included - negative for a short lot, where the premium came in.",
+                    "type": "number"
+                },
                 "created_at": {
                     "type": "string"
+                },
+                "direction": {
+                    "description": "Direction is \"long\" or \"short\"; a written option's lot took premium in\nrather than paying it out, so its figures carry the opposite sign.",
+                    "type": "string"
+                },
+                "gain_unrealized_amount": {
+                    "type": "number"
+                },
+                "gain_unrealized_percent": {
+                    "type": "number"
                 },
                 "holding_id": {
                     "type": "string"
                 },
                 "id": {
                     "type": "string"
+                },
+                "last_price": {
+                    "type": "number"
+                },
+                "market_value": {
+                    "description": "MarketValue and the unrealized figures are nil when the holding has no\nprice: an unpriced lot has an unknown value, not a value of zero, and\nreporting zero would show the whole basis as a loss.",
+                    "type": "number"
                 },
                 "purchase_date": {
                     "type": "string"

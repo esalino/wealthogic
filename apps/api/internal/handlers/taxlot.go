@@ -30,7 +30,14 @@ func NewTaxLotHandler(db *gorm.DB) TaxLotHandler {
 	return &taxLotHandler{db: db}
 }
 
-// taxLotView is a buy transaction presented as a tax lot.
+// taxLotView is an opening transaction presented as a tax lot, with what the
+// open part of it is currently worth.
+//
+// The lot economics are computed here rather than in the client because they
+// need things the lot row alone doesn't carry: the commission and fees that
+// belong in the basis, the contract multiplier that scales an option's
+// per-share price, and the holding's last price - the one place a current
+// price lives.
 type taxLotView struct {
 	ID                uuid.UUID  `json:"id"`
 	AssetType         string     `json:"asset_type"`
@@ -44,6 +51,23 @@ type taxLotView struct {
 	AccountID         uuid.UUID  `json:"account_id"`
 	CreatedAt         time.Time  `json:"created_at"`
 	UpdatedAt         time.Time  `json:"updated_at"`
+
+	// Direction is "long" or "short"; a written option's lot took premium in
+	// rather than paying it out, so its figures carry the opposite sign.
+	Direction          string  `json:"direction"`
+	ContractMultiplier float64 `json:"contract_multiplier"`
+	LastPrice          float64 `json:"last_price"`
+
+	// CostBasis is the open part of the lot at its opening price, commission
+	// and fees included - negative for a short lot, where the premium came in.
+	CostBasis float64 `json:"cost_basis"`
+
+	// MarketValue and the unrealized figures are nil when the holding has no
+	// price: an unpriced lot has an unknown value, not a value of zero, and
+	// reporting zero would show the whole basis as a loss.
+	MarketValue           *float64 `json:"market_value"`
+	GainUnrealizedAmount  *float64 `json:"gain_unrealized_amount"`
+	GainUnrealizedPercent *float64 `json:"gain_unrealized_percent"`
 } // @name TaxLot
 
 func derefString(p *string) string {
@@ -60,21 +84,107 @@ func derefFloat(p *float64) float64 {
 	return 0
 }
 
-func lotView(t models.Transaction) taxLotView {
-	return taxLotView{
-		ID:                t.ID,
-		AssetType:         derefString(t.AssetType),
-		Symbol:            t.Symbol,
-		AssetDescription:  derefString(t.AssetDescription),
-		PurchaseDate:      t.Date,
-		PurchaseQuantity:  derefFloat(t.Quantity),
-		PurchasePrice:     derefFloat(t.Price),
-		RemainingQuantity: derefFloat(t.RemainingQuantity),
-		HoldingID:         t.HoldingID,
-		AccountID:         t.AccountID,
-		CreatedAt:         t.CreatedAt,
-		UpdatedAt:         t.UpdatedAt,
+func absFloat(v float64) float64 {
+	if v < 0 {
+		return -v
 	}
+	return v
+}
+
+// lotView projects an opening transaction into the lot shape the UI expects.
+// holding is the security it belongs to, or nil when it can't be resolved - in
+// which case there is no price and the value figures stay unknown.
+func lotView(t models.Transaction, holding *models.Holding) taxLotView {
+	direction := t.Direction
+	if direction == "" {
+		direction = models.DirectionLong
+	}
+	multiplier, lastPrice := 1.0, 0.0
+	if holding != nil {
+		multiplier = holding.Multiplier()
+		lastPrice = holding.LastPrice
+	}
+
+	remaining := derefFloat(t.RemainingQuantity)
+	basis := remaining * portfolio.LotUnitCost(t, multiplier) * multiplier
+
+	var marketValue, gainAmount, gainPercent *float64
+	if lastPrice != 0 {
+		mv := remaining * lastPrice * multiplier
+		if direction == models.DirectionShort {
+			// The premium is money taken in, and closing the lot costs money -
+			// so both sides sit on the opposite side of zero from a long lot,
+			// and the gain is still value minus basis.
+			basis, mv = -basis, -mv
+		}
+		gain := mv - basis
+		marketValue, gainAmount = &mv, &gain
+		if basis != 0 {
+			pct := gain / absFloat(basis) * 100
+			gainPercent = &pct
+		}
+	} else if direction == models.DirectionShort {
+		basis = -basis
+	}
+
+	return taxLotView{
+		Direction:             direction,
+		ContractMultiplier:    multiplier,
+		LastPrice:             lastPrice,
+		CostBasis:             basis,
+		MarketValue:           marketValue,
+		GainUnrealizedAmount:  gainAmount,
+		GainUnrealizedPercent: gainPercent,
+		ID:                    t.ID,
+		AssetType:             derefString(t.AssetType),
+		Symbol:                t.Symbol,
+		AssetDescription:      derefString(t.AssetDescription),
+		PurchaseDate:          t.Date,
+		PurchaseQuantity:      derefFloat(t.Quantity),
+		PurchasePrice:         derefFloat(t.Price),
+		RemainingQuantity:     derefFloat(t.RemainingQuantity),
+		HoldingID:             t.HoldingID,
+		AccountID:             t.AccountID,
+		CreatedAt:             t.CreatedAt,
+		UpdatedAt:             t.UpdatedAt,
+	}
+}
+
+// holdingsForLots loads the holdings a page of lots belongs to, keyed by id.
+func holdingsForLots(db *gorm.DB, lots []models.Transaction) (map[uuid.UUID]*models.Holding, error) {
+	ids := make([]uuid.UUID, 0, len(lots))
+	seen := map[uuid.UUID]bool{}
+	for _, l := range lots {
+		if l.HoldingID != nil && !seen[*l.HoldingID] {
+			seen[*l.HoldingID] = true
+			ids = append(ids, *l.HoldingID)
+		}
+	}
+	out := map[uuid.UUID]*models.Holding{}
+	if len(ids) == 0 {
+		return out, nil
+	}
+
+	var found []models.Holding
+	if err := db.Where("id IN ?", ids).Find(&found).Error; err != nil {
+		return nil, err
+	}
+	for i := range found {
+		out[found[i].ID] = &found[i]
+	}
+	return out, nil
+}
+
+// lotViewFor resolves a single lot's holding and projects it.
+func lotViewFor(db *gorm.DB, t models.Transaction) taxLotView {
+	var holding *models.Holding
+	if t.HoldingID != nil {
+		var found models.Holding
+		if err := db.First(&found, "id = ?", *t.HoldingID).Error; err == nil {
+			holding = &found
+		}
+	}
+	return lotView(t, holding)
 }
 
 type paginatedTaxLots struct {
@@ -118,7 +228,7 @@ func (h *taxLotHandler) GetTaxLots(c *gin.Context) {
 
 	// Lot-forming stock buys carry a non-null remaining_quantity.
 	filter := func(q *gorm.DB) *gorm.DB {
-		q = q.Where("LOWER(action) = ? AND remaining_quantity IS NOT NULL", "buy")
+		q = q.Where("effect = ? AND remaining_quantity IS NOT NULL", models.EffectOpen)
 		if holdingID != nil {
 			q = q.Where("holding_id = ?", *holdingID)
 		}
@@ -138,9 +248,21 @@ func (h *taxLotHandler) GetTaxLots(c *gin.Context) {
 		return
 	}
 
+	// The holding is where a current price lives, so the page's lots are
+	// resolved against theirs in one query rather than one apiece.
+	holdings, err := holdingsForLots(h.db, buys)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch tax lots"})
+		return
+	}
+
 	views := make([]taxLotView, len(buys))
 	for i := range buys {
-		views[i] = lotView(buys[i])
+		var holding *models.Holding
+		if buys[i].HoldingID != nil {
+			holding = holdings[*buys[i].HoldingID]
+		}
+		views[i] = lotView(buys[i], holding)
 	}
 
 	c.JSON(http.StatusOK, paginatedTaxLots{Data: views, Total: total, Page: page, PageSize: pageSize})
@@ -240,7 +362,7 @@ func (h *taxLotHandler) CreateTaxLot(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusCreated, taxLotWithTransaction{TaxLot: lotView(txn), Transaction: txn})
+	c.JSON(http.StatusCreated, taxLotWithTransaction{TaxLot: lotViewFor(h.db, txn), Transaction: txn})
 }
 
 type updateTaxLotRequest struct {
@@ -335,5 +457,5 @@ func (h *taxLotHandler) UpdateTaxLot(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, lotView(txn))
+	c.JSON(http.StatusOK, lotViewFor(h.db, txn))
 }

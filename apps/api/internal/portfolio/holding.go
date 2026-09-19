@@ -50,15 +50,23 @@ func feeShare(txn models.Transaction, take float64) float64 {
 	return (take / qty) * (txn.Commission + txn.Fees)
 }
 
-// lotBasisPerShare is a long buy's cost basis per share, including its
-// commission and fees spread across the shares.
-func lotBasisPerShare(buy models.Transaction, multiplier float64) float64 {
-	qty := absQuantity(buy)
-	price := unitPrice(buy)
+// LotUnitCost is what one share of an opening trade cost, or took in, with the
+// trade's commission and fees spread across the shares as tax rules require.
+//
+// Costs always work against you, so they add to a long lot's basis and subtract
+// from the premium a written one received. The result is unsigned - it is a
+// magnitude per share, and callers apply the sign that suits their direction.
+func LotUnitCost(open models.Transaction, multiplier float64) float64 {
+	qty := absQuantity(open)
+	price := unitPrice(open)
 	if qty == 0 || multiplier == 0 {
 		return price
 	}
-	return price + (buy.Commission+buy.Fees)/(qty*multiplier)
+	costs := (open.Commission + open.Fees) / (qty * multiplier)
+	if open.Direction == models.DirectionShort {
+		return price - costs
+	}
+	return price + costs
 }
 
 // openLots returns a holding's open lots on one side of the market
@@ -223,7 +231,7 @@ func RecalcHolding(tx *gorm.DB, holding *models.Holding) error {
 	var quantity, costBasisTotal float64
 	for i := range lots {
 		rem := *lots[i].RemainingQuantity
-		value := rem * lotBasisPerShare(lots[i], multiplier) * multiplier
+		value := rem * LotUnitCost(lots[i], multiplier) * multiplier
 		if lots[i].Direction == models.DirectionShort {
 			quantity -= rem
 			costBasisTotal -= value
