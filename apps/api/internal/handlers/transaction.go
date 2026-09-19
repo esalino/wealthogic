@@ -188,6 +188,16 @@ func (h *transactionHandler) CreateTransaction(c *gin.Context) {
 	isBuy := strings.EqualFold(req.Action, "Buy") && req.HoldingID != nil && req.Quantity != nil && req.Price != nil
 	isSell := strings.EqualFold(req.Action, "Sell") && req.HoldingID != nil && req.Quantity != nil && req.Price != nil
 
+	// A hand-entered trade is the ordinary long case: a buy opens a lot, a sell
+	// closes one. The importer sets these too, from Fidelity's opening/closing
+	// markers - options are the only thing that needs the distinction spelled
+	// out, and they aren't entered by hand yet.
+	if isBuy {
+		txn.Effect, txn.Direction = models.EffectOpen, models.DirectionLong
+	} else if isSell {
+		txn.Effect, txn.Direction = models.EffectClose, models.DirectionLong
+	}
+
 	// A stock buy doubles as a tax lot, so seed its open (remaining) quantity.
 	if isBuy {
 		q := *req.Quantity
@@ -439,7 +449,7 @@ func buyHasDisposals(db *gorm.DB, buyID uuid.UUID) (bool, error) {
 func rebuildHolding(tx *gorm.DB, holdingID uuid.UUID, strict bool) error {
 	// Reset every stock buy lot to its full purchased quantity.
 	if err := tx.Model(&models.Transaction{}).
-		Where("holding_id = ? AND LOWER(action) = ? AND remaining_quantity IS NOT NULL", holdingID, "buy").
+		Where("holding_id = ? AND effect = ? AND remaining_quantity IS NOT NULL", holdingID, models.EffectOpen).
 		Update("remaining_quantity", gorm.Expr("quantity")).Error; err != nil {
 		return err
 	}
@@ -458,7 +468,7 @@ func rebuildHolding(tx *gorm.DB, holdingID uuid.UUID, strict bool) error {
 
 	// Replay sells oldest first so lots match to sells chronologically.
 	var sells []models.Transaction
-	if err := tx.Where("holding_id = ? AND LOWER(action) = ?", holdingID, "sell").
+	if err := tx.Where("holding_id = ? AND effect = ?", holdingID, models.EffectClose).
 		Order("date ASC").Order("id ASC").Find(&sells).Error; err != nil {
 		return err
 	}

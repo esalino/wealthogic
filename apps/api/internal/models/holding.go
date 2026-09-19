@@ -23,6 +23,7 @@ const (
 	AssetTypeETF         = "ETF"
 	AssetTypeMutualFund  = "Mutual Fund"
 	AssetTypeBond        = "Bond"
+	AssetTypeOption      = "Option"
 )
 
 // defaultTaxClass is the tax class implied by an asset type alone. It mirrors
@@ -65,6 +66,18 @@ type Holding struct {
 	Symbol      string `json:"symbol"`
 	Description string `gorm:"not null"  json:"description"`
 
+	// Option detail, decoded from the contract symbol (see ParseOptionSymbol).
+	// Nil/empty for everything else.
+	Underlying     string     `gorm:"index" json:"underlying"`
+	OptionType     string     `json:"option_type"` // "call" | "put"
+	StrikePrice    *float64   `json:"strike_price"`
+	ExpirationDate *time.Time `gorm:"type:date" json:"expiration_date"`
+
+	// ContractMultiplier is how many shares one unit of this holding covers -
+	// 100 for a standard option contract, 1 for everything else. Quoted prices
+	// are per share, so every basis and proceeds figure scales by it.
+	ContractMultiplier float64 `gorm:"not null;default:1" json:"contract_multiplier"`
+
 	Status string `gorm:"not null;default:Open" json:"status"`
 
 	LastPrice float64 `json:"last_price"`
@@ -98,6 +111,15 @@ type Holding struct {
 	// computed for responses via AfterFind and never persisted.
 	TaxClass string `gorm:"-" json:"tax_class"`
 } // @name Holding
+
+// Multiplier is the shares one unit of this holding covers, defaulting to 1 for
+// a holding recorded before the field existed.
+func (h Holding) Multiplier() float64 {
+	if h.ContractMultiplier > 0 {
+		return h.ContractMultiplier
+	}
+	return 1
+}
 
 // ResolveTaxClass reports what kind of income this holding produces for tax
 // purposes: the per-holding override when set, otherwise the asset-type default.

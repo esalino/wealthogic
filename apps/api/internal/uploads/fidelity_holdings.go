@@ -65,6 +65,10 @@ func (h *fidelityHoldingsHandler) Process(db *gorm.DB, file io.Reader, _ Options
 	reader.FieldsPerRecord = -1
 
 	result := &Result{}
+	// A transactions export parses as holdings without error (same Symbol and
+	// Description columns), so require this file's own header before trusting a
+	// single row of it.
+	var sawHeader bool
 	for {
 		record, err := reader.Read()
 		if errors.Is(err, io.EOF) {
@@ -72,6 +76,15 @@ func (h *fidelityHoldingsHandler) Process(db *gorm.DB, file io.Reader, _ Options
 		}
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse csv: %w", err)
+		}
+
+		if !sawHeader {
+			if !matchesHeader(record, holdingsHeaderMarkers) {
+				result.Skipped++
+				continue
+			}
+			sawHeader = true
+			continue
 		}
 
 		if len(record) < fidMinColumns {
@@ -118,12 +131,14 @@ func (h *fidelityHoldingsHandler) Process(db *gorm.DB, file io.Reader, _ Options
 		switch {
 		case errors.Is(err, gorm.ErrRecordNotFound):
 			holding = models.Holding{
-				AssetType:    assetType,
-				Symbol:       symbol,
-				Description:  description,
-				LastPrice:    lastPrice,
-				CurrentValue: currentValue,
+				AssetType:          assetType,
+				Symbol:             symbol,
+				Description:        description,
+				LastPrice:          lastPrice,
+				CurrentValue:       currentValue,
+				ContractMultiplier: 1,
 			}
+			applyOptionDetail(&holding)
 			if err := db.Create(&holding).Error; err != nil {
 				return nil, fmt.Errorf("failed to create holding %s: %w", symbol, err)
 			}
@@ -134,6 +149,7 @@ func (h *fidelityHoldingsHandler) Process(db *gorm.DB, file io.Reader, _ Options
 			holding.AssetType = assetType
 			holding.Description = description
 			holding.LastPrice = lastPrice
+			applyOptionDetail(&holding)
 			// Only a value-only holding's value comes from here; for anything
 			// else the transaction ledger owns it and must not be clobbered by
 			// a re-upload of the positions file.
@@ -158,6 +174,9 @@ func (h *fidelityHoldingsHandler) Process(db *gorm.DB, file io.Reader, _ Options
 		}
 	}
 
+	if !sawHeader {
+		return nil, wrongFileError("holdings")
+	}
 	return result, nil
 }
 

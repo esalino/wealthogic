@@ -8,11 +8,14 @@ import (
 	"gorm.io/gorm"
 )
 
-// Result summarizes what an upload handler did with a file.
+// Result summarizes what an upload handler did with a file. Duplicates are
+// counted apart from Skipped: a skipped row was unusable, a duplicate was
+// already imported, and only the latter is expected when files overlap.
 type Result struct {
-	Created int `json:"created"`
-	Updated int `json:"updated"`
-	Skipped int `json:"skipped"`
+	Created    int `json:"created"`
+	Updated    int `json:"updated"`
+	Skipped    int `json:"skipped"`
+	Duplicates int `json:"duplicates"`
 } // @name UploadResult
 
 // Options carries request-level context a handler may need beyond the file

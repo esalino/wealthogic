@@ -1704,6 +1704,10 @@ const docTemplate = `{
                 "average_cost_basis": {
                     "type": "number"
                 },
+                "contract_multiplier": {
+                    "description": "ContractMultiplier is how many shares one unit of this holding covers -\n100 for a standard option contract, 1 for everything else. Quoted prices\nare per share, so every basis and proceeds figure scales by it.",
+                    "type": "number"
+                },
                 "cost_basis_total": {
                     "type": "number"
                 },
@@ -1718,6 +1722,9 @@ const docTemplate = `{
                 },
                 "dividend_income": {
                     "type": "number"
+                },
+                "expiration_date": {
+                    "type": "string"
                 },
                 "gain_realized_amount": {
                     "type": "number"
@@ -1741,11 +1748,18 @@ const docTemplate = `{
                 "last_price": {
                     "type": "number"
                 },
+                "option_type": {
+                    "description": "\"call\" | \"put\"",
+                    "type": "string"
+                },
                 "purchase_quantity": {
                     "type": "number"
                 },
                 "status": {
                     "type": "string"
+                },
+                "strike_price": {
+                    "type": "number"
                 },
                 "symbol": {
                     "type": "string"
@@ -1756,6 +1770,10 @@ const docTemplate = `{
                 },
                 "tax_class_override": {
                     "description": "TaxClassOverride overrides the tax class implied by the asset type. Nil\nmeans \"derive from the asset type\" (see ResolveTaxClass); a non-nil value\nis an explicit user choice - e.g. a treasury-only ETF like TLT classed as\ngovernment_bond even though ETFs are equity by default.",
+                    "type": "string"
+                },
+                "underlying": {
+                    "description": "Option detail, decoded from the contract symbol (see ParseOptionSymbol).\nNil/empty for everything else.",
                     "type": "string"
                 },
                 "updated_at": {
@@ -2340,6 +2358,13 @@ const docTemplate = `{
                 "date": {
                     "type": "string"
                 },
+                "direction": {
+                    "type": "string"
+                },
+                "effect": {
+                    "description": "Effect and Direction describe what a trade does to the lot ledger, which\nthe action alone can't say once options are involved: writing an option\nOPENS a position by selling, and buying it back CLOSES one.\n\nEffect is \"open\" (creates a lot) or \"close\" (depletes lots); Direction is\n\"long\" or \"short\", saying which side the lot sits on. A stock buy is an\nopen/long and a stock sell a close/long, so the existing behaviour is just\nthe ordinary case of the same rule. Empty on non-lot actions.",
+                    "type": "string"
+                },
                 "fees": {
                     "type": "number"
                 },
@@ -2501,6 +2526,9 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "created": {
+                    "type": "integer"
+                },
+                "duplicates": {
                     "type": "integer"
                 },
                 "skipped": {
