@@ -107,7 +107,6 @@ func (h *holdingHandler) CreateHolding(c *gin.Context) {
 	h.enricher.EnrichQuietly(c.Request.Context(), h.db, &holding)
 
 	holding.TaxClass = holding.ResolveTaxClass()
-	holding.AssetClass = holding.ResolveAssetClass()
 	c.JSON(http.StatusCreated, holding)
 }
 
@@ -206,7 +205,6 @@ func (h *holdingHandler) UpdateHolding(c *gin.Context) {
 	}
 
 	holding.TaxClass = holding.ResolveTaxClass()
-	holding.AssetClass = holding.ResolveAssetClass()
 	c.JSON(http.StatusOK, holding)
 }
 
@@ -309,7 +307,7 @@ type allocationSummary struct {
 } // @name AllocationSummary
 
 // GetAllocation godoc
-// @Summary      Portfolio allocation by asset class, and sector within equities
+// @Summary      Portfolio allocation by asset type, and sector within equities
 // @Tags         holdings
 // @Produce      json
 // @Success      200  {object}  allocationSummary
@@ -337,10 +335,9 @@ func (h *holdingHandler) GetAllocation(c *gin.Context) {
 		}
 		total += value
 
-		class := holding.ResolveAssetClass()
-		byClass[class] += value
+		byClass[holding.AssetType] += value
 
-		if class != models.AssetClassEquity {
+		if !isEquityType(holding.AssetType) {
 			continue
 		}
 		equity += value
@@ -363,6 +360,15 @@ func (h *holdingHandler) GetAllocation(c *gin.Context) {
 		summary.EquityPercent = equity / total * 100
 	}
 	c.JSON(http.StatusOK, summary)
+}
+
+// isEquityType reports whether a sector means anything for this asset type.
+func isEquityType(assetType string) bool {
+	switch assetType {
+	case models.AssetTypeStock, models.AssetTypeETF, models.AssetTypeMutualFund:
+		return true
+	}
+	return false
 }
 
 // slicesOf turns a label/value map into percentage slices, largest first.

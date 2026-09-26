@@ -64,9 +64,6 @@ export interface Holding {
   issuer_jurisdiction: string | null
   // Resolved class (override, else asset-type default). Read-only.
   tax_class: string
-  // The allocation slice the tax class implies: Equity, Fixed Income, Cash,
-  // Derivatives, Other. Read-only.
-  asset_class: string
   created_at: string
   updated_at: string
 }

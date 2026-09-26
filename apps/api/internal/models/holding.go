@@ -131,10 +131,8 @@ type Holding struct {
 	IssuerJurisdiction *string `gorm:"size:16" json:"issuer_jurisdiction"`
 
 	// TaxClass is the resolved class (override, else the asset-type default),
-	// computed for responses via AfterFind and never persisted. AssetClass is
-	// the allocation slice it implies.
-	TaxClass   string `gorm:"-" json:"tax_class"`
-	AssetClass string `gorm:"-" json:"asset_class"`
+	// computed for responses via AfterFind and never persisted.
+	TaxClass string `gorm:"-" json:"tax_class"`
 } // @name Holding
 
 // Multiplier is the shares one unit of this holding covers, defaulting to 1 for
@@ -167,42 +165,6 @@ func (h Holding) ResolveIssuerJurisdiction() string {
 	return ""
 }
 
-// Asset classes: the top level of an allocation, above sector.
-//
-// Sector only means something within equities - a Treasury has no sector, and a
-// money-market fund's provider-assigned "Financial Services" describes the fund
-// company rather than the exposure. Splitting by class first is what makes the
-// equity slice legible instead of buried under cash and bonds.
-const (
-	AssetClassEquity      = "Equity"
-	AssetClassFixedIncome = "Fixed Income"
-	AssetClassCash        = "Cash"
-	AssetClassDerivatives = "Derivatives"
-	AssetClassOther       = "Other"
-)
-
-// ResolveAssetClass reports which slice of an allocation this holding belongs
-// to, derived from its tax class rather than a field of its own.
-//
-// The tax class already carries the distinction and is correctable per holding,
-// so a Treasury-only ETF classed as government_bond lands in Fixed Income
-// rather than Equity - which is what it is, whatever its wrapper.
-func (h Holding) ResolveAssetClass() string {
-	// An option's tax class is "other"; the asset type is what identifies it.
-	if h.AssetType == AssetTypeOption {
-		return AssetClassDerivatives
-	}
-	switch h.ResolveTaxClass() {
-	case TaxClassEquity:
-		return AssetClassEquity
-	case TaxClassGovernmentBond, TaxClassMunicipalBond, TaxClassCorporateBond:
-		return AssetClassFixedIncome
-	case TaxClassMoneyMarket:
-		return AssetClassCash
-	}
-	return AssetClassOther
-}
-
 // WantsProfile reports whether it's worth asking a market-data provider about
 // this holding.
 //
@@ -225,6 +187,5 @@ func (h Holding) WantsProfile() bool {
 // AfterFind populates the computed fields whenever a holding is read.
 func (h *Holding) AfterFind(*gorm.DB) error {
 	h.TaxClass = h.ResolveTaxClass()
-	h.AssetClass = h.ResolveAssetClass()
 	return nil
 }

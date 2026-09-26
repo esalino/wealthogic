@@ -1830,9 +1830,6 @@ const docTemplate = `{
         "Holding": {
             "type": "object",
             "properties": {
-                "asset_class": {
-                    "type": "string"
-                },
                 "asset_type": {
                     "type": "string"
                 },
@@ -1923,7 +1920,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "tax_class": {
-                    "description": "TaxClass is the resolved class (override, else the asset-type default),\ncomputed for responses via AfterFind and never persisted. AssetClass is\nthe allocation slice it implies.",
+                    "description": "TaxClass is the resolved class (override, else the asset-type default),\ncomputed for responses via AfterFind and never persisted.",
                     "type": "string"
                 },
                 "tax_class_override": {

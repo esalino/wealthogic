@@ -260,8 +260,6 @@ definitions:
     type: object
   Holding:
     properties:
-      asset_class:
-        type: string
       asset_type:
         type: string
       average_cost_basis:
@@ -339,8 +337,7 @@ definitions:
       tax_class:
         description: |-
           TaxClass is the resolved class (override, else the asset-type default),
-          computed for responses via AfterFind and never persisted. AssetClass is
-          the allocation slice it implies.
+          computed for responses via AfterFind and never persisted.
         type: string
       tax_class_override:
         description: |-
