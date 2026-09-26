@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"fmt"
 	"net/http"
 	"sort"
 	"strconv"
@@ -218,12 +219,20 @@ func parseInputDate(s string) (time.Time, error) {
 	return time.Parse(time.RFC3339, s)
 }
 
+// holdingSortColumns maps the sort keys the API accepts to their columns. The
+// whitelist keeps the parameter from reaching the query as raw SQL.
+var holdingSortColumns = map[string]string{
+	"market_value": "current_value",
+}
+
 // GetHoldings godoc
 // @Summary      List holdings with pagination
 // @Tags         holdings
 // @Produce      json
-// @Param        page       query     int  false  "Page number (default 1)"
-// @Param        page_size  query     int  false  "Items per page (default 20, max 100)"
+// @Param        page       query     int     false  "Page number (default 1)"
+// @Param        page_size  query     int     false  "Items per page (default 20, max 100)"
+// @Param        sort       query     string  false  "Sort field (market_value)"  Enums(market_value)
+// @Param        order      query     string  false  "Sort direction (default desc)"  Enums(asc, desc)
 // @Success      200        {object}  paginatedHoldings
 // @Failure      500        {object}  map[string]string
 // @Router       /holdings [get]
@@ -238,6 +247,19 @@ func (h *holdingHandler) GetHoldings(c *gin.Context) {
 		pageSize = 20
 	}
 
+	// Market value descending is the default: an unsorted page order makes
+	// pagination arbitrary, and largest-first is how the table is read.
+	column, ok := holdingSortColumns[c.Query("sort")]
+	if !ok {
+		column = holdingSortColumns["market_value"]
+	}
+	direction := "DESC"
+	if strings.EqualFold(c.Query("order"), "asc") {
+		direction = "ASC"
+	}
+	// id breaks ties so a row can't appear on two pages or none.
+	order := fmt.Sprintf("%s %s, id %s", column, direction, direction)
+
 	var total int64
 	if err := h.db.Model(&models.Holding{}).Count(&total).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch holdings"})
@@ -246,7 +268,7 @@ func (h *holdingHandler) GetHoldings(c *gin.Context) {
 
 	var holdings []models.Holding
 	offset := (page - 1) * pageSize
-	if err := h.db.Offset(offset).Limit(pageSize).Find(&holdings).Error; err != nil {
+	if err := h.db.Order(order).Offset(offset).Limit(pageSize).Find(&holdings).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch holdings"})
 		return
 	}

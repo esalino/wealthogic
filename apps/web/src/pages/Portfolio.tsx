@@ -7,6 +7,8 @@ import {
   updateHolding,
   type CreateHoldingPayload,
   type Holding as ApiHolding,
+  type HoldingSortField,
+  type SortDirection,
   type TaxLot as ApiTaxLot,
 } from '../api/holdings'
 import { createTaxLot, getTaxLots, updateTaxLot } from '../api/taxLots'
@@ -118,6 +120,42 @@ function rowActions() {
         <span className="material-symbols-outlined text-lg align-middle">more_vert</span>
       </button>
     </td>
+  )
+}
+
+// A right-aligned column header that toggles its own sort direction. Only the
+// active column shows a caret, so the header row reads as one sort, not many.
+function SortableHeader({
+  label,
+  field,
+  sort,
+  onSort,
+}: {
+  label: string
+  field: HoldingSortField
+  sort: { field: HoldingSortField; direction: SortDirection }
+  onSort: (field: HoldingSortField) => void
+}) {
+  const active = sort.field === field
+  return (
+    <th
+      aria-sort={active ? (sort.direction === 'asc' ? 'ascending' : 'descending') : 'none'}
+      className="px-4 py-3 text-right text-label-caps text-on-surface-variant uppercase"
+    >
+      <button
+        onClick={() => onSort(field)}
+        className="group inline-flex items-center gap-0.5 text-label-caps uppercase hover:text-primary transition-colors"
+      >
+        {label}
+        <span
+          className={`material-symbols-outlined text-lg leading-none transition-opacity ${
+            active ? 'text-primary' : 'opacity-0 group-hover:opacity-60'
+          }`}
+        >
+          {active && sort.direction === 'asc' ? 'arrow_drop_up' : 'arrow_drop_down'}
+        </span>
+      </button>
+    </th>
   )
 }
 
@@ -1414,7 +1452,10 @@ function EditTransactionModal({ txn, onClose }: { txn: ApiTransaction | null; on
 
 export default function Portfolio() {
   const [mounted, setMounted] = useState(false)
-  const [sortBy, setSortBy] = useState('Market Value High to Low')
+  const [sort, setSort] = useState<{ field: HoldingSortField; direction: SortDirection }>({
+    field: 'market_value',
+    direction: 'desc',
+  })
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [activeTab, setActiveTab] = useState<SubTab>('Tax Lots')
   const [pagination, setPagination] = useState({ pageIndex: 0, pageSize: 10 })
@@ -1426,9 +1467,21 @@ export default function Portfolio() {
   const [editingTxn, setEditingTxn] = useState<ApiTransaction | null>(null)
 
   const { data, isLoading, isError, error } = useQuery({
-    queryKey: ['holdings', pagination.pageIndex, pagination.pageSize],
-    queryFn: () => getHoldings(pagination.pageIndex + 1, pagination.pageSize),
+    queryKey: ['holdings', pagination.pageIndex, pagination.pageSize, sort.field, sort.direction],
+    queryFn: () => getHoldings(pagination.pageIndex + 1, pagination.pageSize, sort.field, sort.direction),
   })
+
+  // Clicking the active column flips it; a new column starts descending, which
+  // is the useful end of every money figure. Re-sorting reshuffles every page,
+  // so page 1 is the only honest place to land.
+  function toggleSort(field: HoldingSortField) {
+    setSort((prev) =>
+      prev.field === field
+        ? { field, direction: prev.direction === 'desc' ? 'asc' : 'desc' }
+        : { field, direction: 'desc' },
+    )
+    setPagination((p) => ({ ...p, pageIndex: 0 }))
+  }
 
   useEffect(() => {
     const t1 = setTimeout(() => setMounted(true), 100)
@@ -1570,16 +1623,6 @@ export default function Portfolio() {
           <div className="flex items-center justify-between px-6 py-4 border-b border-outline-variant">
             <h2 className="text-headline-sm text-on-surface">Current Holdings</h2>
             <div className="flex items-center gap-3">
-              <label className="text-label-sm text-on-surface-variant">Sort by</label>
-              <select
-                value={sortBy}
-                onChange={(e) => setSortBy(e.target.value)}
-                className="px-3 py-1.5 bg-surface-container-low border border-outline-variant rounded-lg text-body-md text-on-surface focus:outline-none focus:ring-2 focus:ring-secondary/30 focus:border-secondary transition-colors"
-              >
-                <option>Market Value High to Low</option>
-                <option>Performance 24h</option>
-                <option>Asset Class</option>
-              </select>
               <button
                 onClick={() => setAddOpen(true)}
                 className="flex items-center gap-1.5 px-4 py-1.5 bg-primary text-on-primary rounded-lg text-body-md font-semibold hover:opacity-90 transition-opacity"
@@ -1596,7 +1639,7 @@ export default function Portfolio() {
                   <th className="text-left px-4 py-3 text-label-caps text-on-surface-variant uppercase">Symbol</th>
                   <th className="text-right px-4 py-3 text-label-caps text-on-surface-variant uppercase">Price</th>
                   <th className="text-right px-4 py-3 text-label-caps text-on-surface-variant uppercase">Quantity</th>
-                  <th className="text-right px-4 py-3 text-label-caps text-on-surface-variant uppercase">Market Value</th>
+                  <SortableHeader label="Market Value" field="market_value" sort={sort} onSort={toggleSort} />
                   <th className="text-right px-4 py-3 text-label-caps text-on-surface-variant uppercase">Avg Cost</th>
                   <th className="text-right px-4 py-3 text-label-caps text-on-surface-variant uppercase">Cost Basis</th>
                   <th className="text-right px-4 py-3 text-label-caps text-on-surface-variant uppercase">Unrealized Gain</th>

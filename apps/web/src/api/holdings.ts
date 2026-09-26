@@ -75,8 +75,22 @@ export interface PaginatedHoldings {
   page_size: number
 }
 
-export async function getHoldings(page = 1, pageSize = 20): Promise<PaginatedHoldings> {
-  const params = new URLSearchParams({ page: String(page), page_size: String(pageSize) })
+// The only column the API sorts on so far. Widen the union as more are added.
+export type HoldingSortField = 'market_value'
+export type SortDirection = 'asc' | 'desc'
+
+export async function getHoldings(
+  page = 1,
+  pageSize = 20,
+  sort: HoldingSortField = 'market_value',
+  order: SortDirection = 'desc',
+): Promise<PaginatedHoldings> {
+  const params = new URLSearchParams({
+    page: String(page),
+    page_size: String(pageSize),
+    sort,
+    order,
+  })
   const res = await fetch(`${API_BASE}/holdings?${params}`)
 
   if (!res.ok) {

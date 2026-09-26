@@ -1249,6 +1249,19 @@ paths:
         in: query
         name: page_size
         type: integer
+      - description: Sort field (market_value)
+        enum:
+        - market_value
+        in: query
+        name: sort
+        type: string
+      - description: Sort direction (default desc)
+        enum:
+        - asc
+        - desc
+        in: query
+        name: order
+        type: string
       produces:
       - application/json
       responses:
@@ -1356,7 +1369,7 @@ paths:
             additionalProperties:
               type: string
             type: object
-      summary: Portfolio allocation by asset class, and sector within equities
+      summary: Portfolio allocation by asset type, and sector within equities
       tags:
       - holdings
   /holdings/backfill-profiles:

@@ -356,6 +356,25 @@ const docTemplate = `{
                         "description": "Items per page (default 20, max 100)",
                         "name": "page_size",
                         "in": "query"
+                    },
+                    {
+                        "enum": [
+                            "market_value"
+                        ],
+                        "type": "string",
+                        "description": "Sort field (market_value)",
+                        "name": "sort",
+                        "in": "query"
+                    },
+                    {
+                        "enum": [
+                            "asc",
+                            "desc"
+                        ],
+                        "type": "string",
+                        "description": "Sort direction (default desc)",
+                        "name": "order",
+                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -434,7 +453,7 @@ const docTemplate = `{
                 "tags": [
                     "holdings"
                 ],
-                "summary": "Portfolio allocation by asset class, and sector within equities",
+                "summary": "Portfolio allocation by asset type, and sector within equities",
                 "responses": {
                     "200": {
                         "description": "OK",
