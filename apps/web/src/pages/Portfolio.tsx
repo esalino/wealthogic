@@ -8,6 +8,7 @@ import {
   type CreateHoldingPayload,
   type Holding as ApiHolding,
   type HoldingSortField,
+  type HoldingStatusFilter,
   type SortDirection,
   type TaxLot as ApiTaxLot,
 } from '../api/holdings'
@@ -23,6 +24,7 @@ type ChangeDirection = 'positive' | 'negative' | 'neutral'
 interface Holding {
   id: string
   symbol: string
+  status: string
   assetClass: string
   price: string
   quantity: string
@@ -66,6 +68,7 @@ function toViewHolding(h: ApiHolding, totalMarketValue: number): Holding {
   return {
     id: h.id,
     symbol: h.symbol || '—',
+    status: h.status,
     assetClass: h.asset_type || h.description || '',
     price: fmtCurrency(h.last_price),
     quantity: fmtNumber(h.purchase_quantity),
@@ -120,6 +123,115 @@ function rowActions() {
         <span className="material-symbols-outlined text-lg align-middle">more_vert</span>
       </button>
     </td>
+  )
+}
+
+// Only a closed position is badged. Open is the norm, so badging every row would
+// be noise on the common case and would stop the exception from standing out.
+function StatusBadge({ status }: { status: string }) {
+  if (status !== 'Closed') return null
+  return (
+    <span className="px-1.5 py-0.5 rounded bg-surface-container-high text-label-caps uppercase text-on-surface-variant">
+      Closed
+    </span>
+  )
+}
+
+const STATUS_FILTERS: { value: HoldingStatusFilter; label: string }[] = [
+  { value: 'Open', label: 'Open only' },
+  { value: 'Closed', label: 'Closed only' },
+  { value: 'all', label: 'All holdings' },
+]
+
+// A popover for the table's filters, built to hold more than the one it starts
+// with. It counts what's active so a non-default filter can't be left on
+// invisibly - the whole table would otherwise look like missing data.
+function FilterMenu({
+  status,
+  onStatusChange,
+}: {
+  status: HoldingStatusFilter
+  onStatusChange: (s: HoldingStatusFilter) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const [pos, setPos] = useState({ top: 0, right: 0 })
+  const btnRef = useRef<HTMLButtonElement>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
+
+  const activeCount = status === 'Open' ? 0 : 1
+
+  useEffect(() => {
+    if (!open) return
+    const close = () => setOpen(false)
+    function handler(e: MouseEvent) {
+      if (btnRef.current?.contains(e.target as Node)) return
+      if (menuRef.current?.contains(e.target as Node)) return
+      close()
+    }
+    // Fixed-positioned like RowMenu, so scrolling or resizing has to dismiss it.
+    document.addEventListener('mousedown', handler)
+    window.addEventListener('scroll', close, true)
+    window.addEventListener('resize', close)
+    return () => {
+      document.removeEventListener('mousedown', handler)
+      window.removeEventListener('scroll', close, true)
+      window.removeEventListener('resize', close)
+    }
+  }, [open])
+
+  function toggle() {
+    if (!open && btnRef.current) {
+      const rect = btnRef.current.getBoundingClientRect()
+      setPos({ top: rect.bottom + 4, right: window.innerWidth - rect.right })
+    }
+    setOpen((v) => !v)
+  }
+
+  return (
+    <div className="relative inline-flex">
+      <button
+        ref={btnRef}
+        onClick={toggle}
+        aria-haspopup="true"
+        aria-expanded={open}
+        className="flex items-center gap-1.5 px-4 py-1.5 border border-outline-variant rounded-lg text-body-md text-on-surface hover:bg-surface-container-high transition-colors"
+      >
+        <span className="material-symbols-outlined text-lg">filter_list</span>
+        Filter
+        {activeCount > 0 && (
+          <span className="ml-0.5 min-w-5 px-1.5 rounded-full bg-primary text-on-primary text-label-sm font-semibold tabular-nums">
+            {activeCount}
+          </span>
+        )}
+      </button>
+
+      {open && createPortal(
+        <div
+          ref={menuRef}
+          style={{ top: pos.top, right: pos.right }}
+          className="fixed z-40 w-52 bg-surface-container-lowest rounded-lg shadow-card border border-outline-variant py-2"
+        >
+          <p className="px-3 pb-1.5 text-label-caps uppercase text-on-surface-variant">Status</p>
+          {STATUS_FILTERS.map((opt) => (
+            <button
+              key={opt.value}
+              onClick={() => { onStatusChange(opt.value); setOpen(false) }}
+              className="w-full flex items-center gap-2 px-3 py-2 text-body-md text-on-surface hover:bg-surface-container-low transition-colors"
+            >
+              <span
+                className={`material-symbols-outlined text-base ${
+                  status === opt.value ? 'text-primary' : 'text-transparent'
+                }`}
+              >
+                check
+              </span>
+              {opt.label}
+            </button>
+          ))}
+        </div>,
+        document.body,
+      )}
+    </div>
   )
 }
 
@@ -1456,6 +1568,7 @@ export default function Portfolio() {
     field: 'market_value',
     direction: 'desc',
   })
+  const [statusFilter, setStatusFilter] = useState<HoldingStatusFilter>('Open')
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [activeTab, setActiveTab] = useState<SubTab>('Tax Lots')
   const [pagination, setPagination] = useState({ pageIndex: 0, pageSize: 10 })
@@ -1467,9 +1580,18 @@ export default function Portfolio() {
   const [editingTxn, setEditingTxn] = useState<ApiTransaction | null>(null)
 
   const { data, isLoading, isError, error } = useQuery({
-    queryKey: ['holdings', pagination.pageIndex, pagination.pageSize, sort.field, sort.direction],
-    queryFn: () => getHoldings(pagination.pageIndex + 1, pagination.pageSize, sort.field, sort.direction),
+    queryKey: ['holdings', pagination.pageIndex, pagination.pageSize, sort.field, sort.direction, statusFilter],
+    queryFn: () =>
+      getHoldings(pagination.pageIndex + 1, pagination.pageSize, sort.field, sort.direction, statusFilter),
   })
+
+  // Narrowing the set changes how many pages there are, so the current page
+  // index may no longer exist. Page 1 is the only index always valid.
+  function changeStatusFilter(next: HoldingStatusFilter) {
+    setStatusFilter(next)
+    setPagination((p) => ({ ...p, pageIndex: 0 }))
+    setExpandedId(null)
+  }
 
   // Clicking the active column flips it; a new column starts descending, which
   // is the useful end of every money figure. Re-sorting reshuffles every page,
@@ -1623,6 +1745,7 @@ export default function Portfolio() {
           <div className="flex items-center justify-between px-6 py-4 border-b border-outline-variant">
             <h2 className="text-headline-sm text-on-surface">Current Holdings</h2>
             <div className="flex items-center gap-3">
+              <FilterMenu status={statusFilter} onStatusChange={changeStatusFilter} />
               <button
                 onClick={() => setAddOpen(true)}
                 className="flex items-center gap-1.5 px-4 py-1.5 bg-primary text-on-primary rounded-lg text-body-md font-semibold hover:opacity-90 transition-opacity"
@@ -1666,7 +1789,7 @@ export default function Portfolio() {
                 {!isLoading && !isError && pageHoldings.length === 0 && (
                   <tr>
                     <td colSpan={10} className="px-4 py-10 text-center text-body-md text-on-surface-variant">
-                      No holdings yet.
+                      {statusFilter === 'Open' ? 'No holdings yet.' : `No ${statusFilter === 'all' ? '' : statusFilter.toLowerCase() + ' '}holdings match this filter.`}
                     </td>
                   </tr>
                 )}
@@ -1688,7 +1811,10 @@ export default function Portfolio() {
                               chevron_right
                             </span>
                             <div>
-                              <p className="text-body-md font-semibold text-on-surface">{h.symbol}</p>
+                              <div className="flex items-center gap-2">
+                                <p className="text-body-md font-semibold text-on-surface">{h.symbol}</p>
+                                <StatusBadge status={h.status} />
+                              </div>
                               <p className="text-label-sm text-on-surface-variant">{h.assetClass}</p>
                             </div>
                           </div>

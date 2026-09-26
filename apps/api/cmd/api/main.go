@@ -73,6 +73,7 @@ func main() {
 	r.PATCH("/holdings/:id", holdingHandler.UpdateHolding)
 	r.GET("/holdings/allocation", holdingHandler.GetAllocation)
 	r.POST("/holdings/backfill-profiles", holdingHandler.BackfillProfiles)
+	r.POST("/holdings/recalculate", holdingHandler.Recalculate)
 	r.GET("/tax-lots", taxLotHandler.GetTaxLots)
 	r.POST("/tax-lots", taxLotHandler.CreateTaxLot)
 	r.PATCH("/tax-lots/:id", taxLotHandler.UpdateTaxLot)

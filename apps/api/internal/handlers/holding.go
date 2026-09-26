@@ -20,6 +20,7 @@ type HoldingHandler interface {
 	CreateHolding(c *gin.Context)
 	UpdateHolding(c *gin.Context)
 	BackfillProfiles(c *gin.Context)
+	Recalculate(c *gin.Context)
 	GetAllocation(c *gin.Context)
 }
 
@@ -219,6 +220,9 @@ func parseInputDate(s string) (time.Time, error) {
 	return time.Parse(time.RFC3339, s)
 }
 
+// statusFilterAll is the opt-in for seeing closed positions alongside open ones.
+const statusFilterAll = "all"
+
 // holdingSortColumns maps the sort keys the API accepts to their columns. The
 // whitelist keeps the parameter from reaching the query as raw SQL.
 var holdingSortColumns = map[string]string{
@@ -233,6 +237,7 @@ var holdingSortColumns = map[string]string{
 // @Param        page_size  query     int     false  "Items per page (default 20, max 100)"
 // @Param        sort       query     string  false  "Sort field (market_value)"  Enums(market_value)
 // @Param        order      query     string  false  "Sort direction (default desc)"  Enums(asc, desc)
+// @Param        status     query     string  false  "Status filter (default Open)"  Enums(Open, Closed, all)
 // @Success      200        {object}  paginatedHoldings
 // @Failure      500        {object}  map[string]string
 // @Router       /holdings [get]
@@ -245,6 +250,22 @@ func (h *holdingHandler) GetHoldings(c *gin.Context) {
 	}
 	if pageSize < 1 || pageSize > 100 {
 		pageSize = 20
+	}
+
+	// Closed positions are excluded unless asked for: they're the archive, and a
+	// book with more exits than holdings would otherwise bury the live ones.
+	// "all" is the explicit way to see both.
+	// Only "all" widens the set. Anything unrecognized falls back to the default
+	// rather than showing everything, so a typo can't quietly double the table.
+	statusFilter := c.DefaultQuery("status", models.HoldingStatusOpen)
+	if statusFilter != models.HoldingStatusClosed && statusFilter != statusFilterAll {
+		statusFilter = models.HoldingStatusOpen
+	}
+	scoped := func(q *gorm.DB) *gorm.DB {
+		if statusFilter == statusFilterAll {
+			return q
+		}
+		return q.Where("status = ?", statusFilter)
 	}
 
 	// Market value descending is the default: an unsorted page order makes
@@ -261,14 +282,14 @@ func (h *holdingHandler) GetHoldings(c *gin.Context) {
 	order := fmt.Sprintf("%s %s, id %s", column, direction, direction)
 
 	var total int64
-	if err := h.db.Model(&models.Holding{}).Count(&total).Error; err != nil {
+	if err := scoped(h.db.Model(&models.Holding{})).Count(&total).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch holdings"})
 		return
 	}
 
 	var holdings []models.Holding
 	offset := (page - 1) * pageSize
-	if err := h.db.Order(order).Offset(offset).Limit(pageSize).Find(&holdings).Error; err != nil {
+	if err := scoped(h.db).Order(order).Offset(offset).Limit(pageSize).Find(&holdings).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch holdings"})
 		return
 	}
@@ -306,6 +327,54 @@ func (h *holdingHandler) BackfillProfiles(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to backfill profiles"})
 		return
 	}
+	c.JSON(http.StatusOK, result)
+}
+
+// recalculateResult reports what a sweep touched.
+type recalculateResult struct {
+	Holdings int `json:"holdings"`
+	Open     int `json:"open"`
+	Closed   int `json:"closed"`
+} // @name RecalculateResult
+
+// Recalculate godoc
+// @Summary      Recompute every holding's aggregates from its ledger
+// @Tags         holdings
+// @Produce      json
+// @Success      200  {object}  recalculateResult
+// @Failure      500  {object}  map[string]string
+// @Router       /holdings/recalculate [post]
+//
+// An import recomputes only the holdings it touched, so holdings that were last
+// written before a derivation changed keep their old figures - a position sold
+// to zero before status was derived still reads Open. This replays the
+// derivation over the whole book.
+func (h *holdingHandler) Recalculate(c *gin.Context) {
+	var holdings []models.Holding
+	if err := h.db.Find(&holdings).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch holdings"})
+		return
+	}
+
+	result := recalculateResult{Holdings: len(holdings)}
+	// One transaction per holding: a single bad row shouldn't roll back the
+	// whole sweep, and each recompute is already self-contained.
+	for i := range holdings {
+		if err := h.db.Transaction(func(tx *gorm.DB) error {
+			return portfolio.RecalcHolding(tx, &holdings[i])
+		}); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error": fmt.Sprintf("failed to recompute holding %s", holdings[i].Symbol),
+			})
+			return
+		}
+		if holdings[i].Status == models.HoldingStatusClosed {
+			result.Closed++
+			continue
+		}
+		result.Open++
+	}
+
 	c.JSON(http.StatusOK, result)
 }
 

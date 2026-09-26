@@ -566,6 +566,15 @@ definitions:
       total:
         type: number
     type: object
+  RecalculateResult:
+    properties:
+      closed:
+        type: integer
+      holdings:
+        type: integer
+      open:
+        type: integer
+    type: object
   TaxBucket:
     properties:
       amount:
@@ -1262,6 +1271,14 @@ paths:
         in: query
         name: order
         type: string
+      - description: Status filter (default Open)
+        enum:
+        - Open
+        - Closed
+        - all
+        in: query
+        name: status
+        type: string
       produces:
       - application/json
       responses:
@@ -1394,6 +1411,24 @@ paths:
               type: string
             type: object
       summary: Look up reference data for holdings that don't have it yet
+      tags:
+      - holdings
+  /holdings/recalculate:
+    post:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/RecalculateResult'
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Recompute every holding's aggregates from its ledger
       tags:
       - holdings
   /tax-lots:

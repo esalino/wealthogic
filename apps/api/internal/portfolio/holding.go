@@ -3,6 +3,7 @@
 package portfolio
 
 import (
+	"math"
 	"strings"
 
 	"github.com/eriksalino/wealthogic/api/internal/models"
@@ -10,6 +11,11 @@ import (
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
+
+// quantityEpsilon is the point below which a position counts as flat. Depleting
+// a lot subtracts floats, so selling out of a fractional holding can leave a
+// residue many orders of magnitude smaller than any real share count.
+const quantityEpsilon = 1e-9
 
 // absQuantity is a transaction's size in units, sign discarded - Fidelity signs
 // quantity by trade direction (negative when sold), which the Effect and
@@ -280,5 +286,33 @@ func RecalcHolding(tx *gorm.DB, holding *models.Holding) error {
 		holding.GainRealizedPercent = 0
 	}
 
+	// Only a flat position can be closed, and only the ledger can say it was
+	// closed rather than never loaded - so the count is worth a query only once
+	// the quantity is already flat.
+	var closings int64
+	if math.Abs(quantity) < quantityEpsilon {
+		if err := tx.Model(&models.Transaction{}).
+			Where("holding_id = ? AND effect = ?", holding.ID, models.EffectClose).
+			Count(&closings).Error; err != nil {
+			return err
+		}
+	}
+	holding.Status = DeriveStatus(quantity, closings)
+
 	return tx.Save(holding).Error
+}
+
+// DeriveStatus decides a holding's status from its position and its ledger.
+//
+// A position that a sale took to zero is closed. A zero quantity alone doesn't
+// say that: a holding imported without its transaction history has no lots
+// either, and that's an absent ledger rather than an exited position - which is
+// why a closing transaction has to exist to have done the closing. The rule runs
+// both ways, so deleting that sale or buying back in reopens the holding; the
+// status follows the ledger instead of latching.
+func DeriveStatus(quantity float64, closings int64) string {
+	if closings > 0 && math.Abs(quantity) < quantityEpsilon {
+		return models.HoldingStatusClosed
+	}
+	return models.HoldingStatusOpen
 }

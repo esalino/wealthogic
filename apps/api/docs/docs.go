@@ -375,6 +375,17 @@ const docTemplate = `{
                         "description": "Sort direction (default desc)",
                         "name": "order",
                         "in": "query"
+                    },
+                    {
+                        "enum": [
+                            "Open",
+                            "Closed",
+                            "all"
+                        ],
+                        "type": "string",
+                        "description": "Status filter (default Open)",
+                        "name": "status",
+                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -500,6 +511,34 @@ const docTemplate = `{
                     },
                     "503": {
                         "description": "Service Unavailable",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/holdings/recalculate": {
+            "post": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "holdings"
+                ],
+                "summary": "Recompute every holding's aggregates from its ledger",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/RecalculateResult"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -2252,6 +2291,20 @@ const docTemplate = `{
                 },
                 "total": {
                     "type": "number"
+                }
+            }
+        },
+        "RecalculateResult": {
+            "type": "object",
+            "properties": {
+                "closed": {
+                    "type": "integer"
+                },
+                "holdings": {
+                    "type": "integer"
+                },
+                "open": {
+                    "type": "integer"
                 }
             }
         },

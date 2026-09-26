@@ -79,17 +79,22 @@ export interface PaginatedHoldings {
 export type HoldingSortField = 'market_value'
 export type SortDirection = 'asc' | 'desc'
 
+// 'all' shows open and closed together; the API defaults to open only.
+export type HoldingStatusFilter = 'Open' | 'Closed' | 'all'
+
 export async function getHoldings(
   page = 1,
   pageSize = 20,
   sort: HoldingSortField = 'market_value',
   order: SortDirection = 'desc',
+  status: HoldingStatusFilter = 'Open',
 ): Promise<PaginatedHoldings> {
   const params = new URLSearchParams({
     page: String(page),
     page_size: String(pageSize),
     sort,
     order,
+    status,
   })
   const res = await fetch(`${API_BASE}/holdings?${params}`)
 
