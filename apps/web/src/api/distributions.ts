@@ -47,3 +47,55 @@ export async function getDistributions(
 
   return res.json()
 }
+
+// Creating or updating an income payment by hand. Uploads build the same
+// record; this is the other way in. The category is what the payment is —
+// 'dividend' from a security, 'interest' from a cash or savings balance.
+export interface DistributionPayload {
+  account_id: string
+  holding_id?: string | null
+  category: string
+  symbol: string
+  asset_type?: string | null
+  payment_date: string
+  amount: number
+}
+
+export async function createDistribution(payload: DistributionPayload): Promise<Distribution> {
+  const res = await fetch(`${API_BASE}/distributions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.error ?? 'Failed to create distribution')
+  }
+
+  return res.json()
+}
+
+export async function updateDistribution(id: string, payload: DistributionPayload): Promise<Distribution> {
+  const res = await fetch(`${API_BASE}/distributions/${id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.error ?? 'Failed to update distribution')
+  }
+
+  return res.json()
+}
+
+export async function deleteDistribution(id: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/distributions/${id}`, { method: 'DELETE' })
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.error ?? 'Failed to delete distribution')
+  }
+}

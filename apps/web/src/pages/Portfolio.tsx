@@ -15,7 +15,13 @@ import {
 import { createTaxLot, getTaxLots, updateTaxLot } from '../api/taxLots'
 import { getAllocation, type AllocationSlice } from '../api/holdings'
 import { createTransaction, deleteTransaction, getTransactions, updateTransaction, type Transaction as ApiTransaction } from '../api/transactions'
-import { getDistributions } from '../api/distributions'
+import {
+  createDistribution,
+  deleteDistribution,
+  getDistributions,
+  updateDistribution,
+  type Distribution as ApiDistribution,
+} from '../api/distributions'
 import { getJurisdictions } from '../api/tax'
 import { getAccounts } from '../api/accounts'
 
@@ -25,6 +31,9 @@ interface Holding {
   id: string
   symbol: string
   status: string
+  // Raw asset_type, kept apart from assetClass (which falls back to the
+  // description for display) so records written from here carry the real value.
+  assetType: string
   assetClass: string
   price: string
   quantity: string
@@ -69,6 +78,7 @@ function toViewHolding(h: ApiHolding, totalMarketValue: number): Holding {
     id: h.id,
     symbol: h.symbol || '—',
     status: h.status,
+    assetType: h.asset_type || '',
     assetClass: h.asset_type || h.description || '',
     price: fmtCurrency(h.last_price),
     quantity: fmtNumber(h.purchase_quantity),
@@ -112,16 +122,6 @@ function gainCell(amount: string, percent: string) {
     <td className="px-4 py-4 text-right tabular-nums">
       <div className={`text-data-tabular font-semibold ${color}`}>{amount}</div>
       <div className={`text-label-sm ${color}`}>{percent}</div>
-    </td>
-  )
-}
-
-function rowActions() {
-  return (
-    <td className="px-4 py-3 text-right w-10">
-      <button className="text-on-surface-variant hover:text-primary transition-colors" aria-label="Edit record">
-        <span className="material-symbols-outlined text-lg align-middle">more_vert</span>
-      </button>
     </td>
   )
 }
@@ -271,7 +271,7 @@ function SortableHeader({
   )
 }
 
-function SubPanel({ holding, activeTab, onTabChange, onAddLot, onEditLot, onAddTransaction, onEditTransaction }: { holding: Holding; activeTab: SubTab; onTabChange: (t: SubTab) => void; onAddLot: () => void; onEditLot: (lot: ApiTaxLot) => void; onAddTransaction: () => void; onEditTransaction: (txn: ApiTransaction) => void }) {
+function SubPanel({ holding, activeTab, onTabChange, onAddLot, onEditLot, onAddTransaction, onEditTransaction, onAddDividend, onEditDividend }: { holding: Holding; activeTab: SubTab; onTabChange: (t: SubTab) => void; onAddLot: () => void; onEditLot: (lot: ApiTaxLot) => void; onAddTransaction: () => void; onEditTransaction: (txn: ApiTransaction) => void; onAddDividend: () => void; onEditDividend: (dist: ApiDistribution) => void }) {
   // Lazy-load this holding's tax lots when the row is opened. Keyed by holding
   // id so createTaxLot's invalidation of ['tax-lots'] refetches this list.
   const { data: taxLotsData, isLoading: lotsLoading } = useQuery({
@@ -305,6 +305,16 @@ function SubPanel({ holding, activeTab, onTabChange, onAddLot, onEditLot, onAddT
       queryClient.invalidateQueries({ queryKey: ['holdings'] })
     },
   })
+  const deleteDist = useMutation({
+    mutationFn: deleteDistribution,
+    onSuccess: () => {
+      // The realized event and its tax treatment are derived from the payment,
+      // so removing it replays both.
+      queryClient.invalidateQueries({ queryKey: ['distributions'] })
+      queryClient.invalidateQueries({ queryKey: ['holdings'] })
+      queryClient.invalidateQueries({ queryKey: ['tax'] })
+    },
+  })
 
   return (
     <div className="p-6 space-y-4">
@@ -329,7 +339,7 @@ function SubPanel({ holding, activeTab, onTabChange, onAddLot, onEditLot, onAddT
           })}
         </div>
         <button
-          onClick={activeTab === 'Tax Lots' ? onAddLot : activeTab === 'Transactions' ? onAddTransaction : undefined}
+          onClick={activeTab === 'Tax Lots' ? onAddLot : activeTab === 'Transactions' ? onAddTransaction : onAddDividend}
           className="flex items-center gap-1 pb-2 text-label-sm font-semibold text-secondary hover:opacity-80 transition-opacity"
         >
           <span className="material-symbols-outlined text-base">add</span>
@@ -491,7 +501,9 @@ function SubPanel({ holding, activeTab, onTabChange, onAddLot, onEditLot, onAddT
                       </span>
                     </td>
                     <td className="px-4 py-3 text-right text-secondary">{fmtSignedCurrency(dist.amount)}</td>
-                    {rowActions()}
+                    <td className="px-4 py-3 text-right w-10">
+                      <RowMenu onEdit={() => onEditDividend(dist)} onDelete={() => deleteDist.mutate(dist.id)} />
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -527,6 +539,18 @@ function doughnutGradient(slices: AllocationSlice[]): string {
 
 const ASSET_TYPES = ['Stock', 'ETF', 'Mutual Fund', 'Bond', 'Money Market', 'Crypto', 'Other']
 
+// Asset types whose worth is a balance rather than a share count at a price. A
+// money-market fund holds a stable $1 NAV, so quantity * price is a roundabout
+// way to state a number the statement already gives you - and leaving the price
+// blank silently values the whole position at zero. The holdings importer draws
+// the same line (its "value-only" rows) and takes the value straight from the
+// broker, so the manual form has to be able to say the same thing.
+const VALUE_ONLY_ASSET_TYPES = new Set(['Money Market'])
+
+function isValueOnly(assetType: string): boolean {
+  return VALUE_ONLY_ASSET_TYPES.has(assetType)
+}
+
 // ── Shared holding form ───────────────────────────────────────────────────────
 
 // Tax classes describe what an asset pays, not how it's taxed - the
@@ -552,6 +576,8 @@ interface HoldingFields {
   description: string
   quantity: string
   lastPrice: string
+  // Entered directly, and only for a value-only asset type. See isValueOnly.
+  marketValue: string
   avgCostBasis: string
   dividendIncome: string
   taxClass: string // 'auto' or a tax class
@@ -564,6 +590,7 @@ const emptyHoldingFields: HoldingFields = {
   description: '',
   quantity: '',
   lastPrice: '',
+  marketValue: '',
   avgCostBasis: '',
   dividendIncome: '',
   taxClass: 'auto',
@@ -599,6 +626,7 @@ function fieldsFromHolding(h: ApiHolding): HoldingFields {
     description: h.description ?? '',
     quantity: String(h.purchase_quantity ?? ''),
     lastPrice: String(h.last_price ?? ''),
+    marketValue: String(h.current_value ?? ''),
     avgCostBasis: String(h.average_cost_basis ?? ''),
     dividendIncome: String(h.dividend_income ?? ''),
     taxClass: h.tax_class_override ?? 'auto',
@@ -610,17 +638,36 @@ function fieldsToPayload(f: HoldingFields): CreateHoldingPayload {
   const qty = parseFloat(f.quantity) || 0
   const price = parseFloat(f.lastPrice) || 0
   const avgCost = parseFloat(f.avgCostBasis) || 0
+  const value = parseFloat(f.marketValue) || 0
+
+  // A balance is stated, not derived. Quantity stays zero, which is what marks
+  // the holding as value-only everywhere else - the importer writes it the same
+  // way, and RecalcHolding leaves a holding with no lots alone. Cost basis is
+  // the balance itself: a dollar in a $1-NAV fund has no unrealized gain, and
+  // the interest it pays is income, which dividend_income already carries.
+  const position = isValueOnly(f.assetType)
+    ? {
+        last_price: 0,
+        purchase_quantity: 0,
+        current_value: value,
+        average_cost_basis: 0,
+        cost_basis_total: value,
+      }
+    : {
+        last_price: price,
+        purchase_quantity: qty,
+        // Derived from the entered quantity, price, and average cost rather
+        // than asked for directly.
+        current_value: price * qty,
+        average_cost_basis: avgCost,
+        cost_basis_total: avgCost * qty,
+      }
+
   return {
     asset_type: f.assetType,
     symbol: f.symbol.trim(),
     description: f.description.trim(),
-    last_price: price,
-    purchase_quantity: qty,
-    // current_value and cost_basis_total are derived from the entered
-    // quantity, price, and average cost rather than asked for directly.
-    current_value: price * qty,
-    average_cost_basis: avgCost,
-    cost_basis_total: avgCost * qty,
+    ...position,
     dividend_income: parseFloat(f.dividendIncome) || 0,
     // 'auto' clears the override back to the asset-type default. An issuer is
     // only meaningful for the bond classes, so it's dropped otherwise rather
@@ -647,6 +694,7 @@ function HoldingFormFields({
   fields: HoldingFields
   set: <K extends keyof HoldingFields>(key: K, value: HoldingFields[K]) => void
 }) {
+  const valueOnly = isValueOnly(fields.assetType)
   return (
     <div className="space-y-4">
       <div>
@@ -678,48 +726,74 @@ function HoldingFormFields({
         </select>
       </div>
 
-      <div className="grid grid-cols-2 gap-4">
+      {valueOnly ? (
         <div>
-          <label className="block text-label-sm font-semibold text-on-surface mb-1.5">Quantity</label>
-          <input
-            type="number"
-            value={fields.quantity}
-            onChange={(e) => set('quantity', e.target.value)}
-            placeholder="0.00"
-            className={modalNumInputCls}
-          />
-        </div>
-        <div>
-          <label className="block text-label-sm font-semibold text-on-surface mb-1.5">Last Price</label>
+          <label className="block text-label-sm font-semibold text-on-surface mb-1.5">Market Value</label>
           <div className="relative">
             <span className="absolute left-3 top-1/2 -translate-y-1/2 text-body-md text-on-surface-variant">$</span>
             <input
               type="number"
-              value={fields.lastPrice}
-              onChange={(e) => set('lastPrice', e.target.value)}
+              value={fields.marketValue}
+              onChange={(e) => set('marketValue', e.target.value)}
               placeholder="0.00"
               className={`${modalNumInputCls} pl-7`}
             />
           </div>
+          <p className="mt-1 text-label-sm text-on-surface-variant">
+            The balance itself. A {fields.assetType.toLowerCase()} holds a stable $1 value per
+            share, so there's no share count or price to derive it from — and no unrealized gain.
+            Interest it pays belongs in Dividend Income.
+          </p>
         </div>
-      </div>
+      ) : (
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className="block text-label-sm font-semibold text-on-surface mb-1.5">Quantity</label>
+            <input
+              type="number"
+              value={fields.quantity}
+              onChange={(e) => set('quantity', e.target.value)}
+              placeholder="0.00"
+              className={modalNumInputCls}
+            />
+          </div>
+          <div>
+            <label className="block text-label-sm font-semibold text-on-surface mb-1.5">Last Price</label>
+            <div className="relative">
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-body-md text-on-surface-variant">$</span>
+              <input
+                type="number"
+                value={fields.lastPrice}
+                onChange={(e) => set('lastPrice', e.target.value)}
+                placeholder="0.00"
+                className={`${modalNumInputCls} pl-7`}
+              />
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-2 gap-4">
-        <div>
-          <label className="block text-label-sm font-semibold text-on-surface mb-1.5">Avg Cost Basis</label>
-          <div className="relative">
-            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-body-md text-on-surface-variant">$</span>
-            <input
-              type="number"
-              value={fields.avgCostBasis}
-              onChange={(e) => set('avgCostBasis', e.target.value)}
-              placeholder="0.00"
-              className={`${modalNumInputCls} pl-7`}
-            />
+        {/* Average cost per unit says nothing about a balance with no units. */}
+        {!valueOnly && (
+          <div>
+            <label className="block text-label-sm font-semibold text-on-surface mb-1.5">Avg Cost Basis</label>
+            <div className="relative">
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-body-md text-on-surface-variant">$</span>
+              <input
+                type="number"
+                value={fields.avgCostBasis}
+                onChange={(e) => set('avgCostBasis', e.target.value)}
+                placeholder="0.00"
+                className={`${modalNumInputCls} pl-7`}
+              />
+            </div>
           </div>
-        </div>
+        )}
         <div>
-          <label className="block text-label-sm font-semibold text-on-surface mb-1.5">Dividend Income</label>
+          <label className="block text-label-sm font-semibold text-on-surface mb-1.5">
+            {valueOnly ? 'Interest / Dividend Income' : 'Dividend Income'}
+          </label>
           <div className="relative">
             <span className="absolute left-3 top-1/2 -translate-y-1/2 text-body-md text-on-surface-variant">$</span>
             <input
@@ -1562,6 +1636,267 @@ function EditTransactionModal({ txn, onClose }: { txn: ApiTransaction | null; on
   )
 }
 
+// ── Dividend modals ──────────────────────────────────────────────────────────
+
+// What the payment is, not how it's taxed: the jurisdiction rules turn a
+// category plus the holding's tax class into qualified, ordinary, or exempt.
+const INCOME_CATEGORIES = [
+  { value: 'dividend', label: 'Dividend' },
+  { value: 'interest', label: 'Interest' },
+]
+
+// A dividend defaults to the category its payer would pay. A money-market or
+// savings balance pays interest; a security pays a dividend.
+function defaultIncomeCategory(assetType: string): string {
+  return isValueOnly(assetType) ? 'interest' : 'dividend'
+}
+
+type DividendTarget = { id: string; symbol: string; assetType: string }
+
+function AddDividendModal({ holding, onClose }: { holding: DividendTarget | null; onClose: () => void }) {
+  const queryClient = useQueryClient()
+  const { data: accountsData } = useQuery({
+    queryKey: ['accounts', 'select'],
+    queryFn: () => getAccounts(1, 100),
+    enabled: holding !== null,
+  })
+  const accounts = accountsData?.data ?? []
+
+  const [accountId, setAccountId] = useState('')
+  const [category, setCategory] = useState('')
+  const [date, setDate] = useState('')
+  const [amount, setAmount] = useState('')
+
+  const { mutate, isPending, error, reset } = useMutation({
+    mutationFn: createDistribution,
+    onSuccess: () => {
+      // Income feeds the realized ledger and the tax summary, so both go stale.
+      queryClient.invalidateQueries({ queryKey: ['distributions'] })
+      queryClient.invalidateQueries({ queryKey: ['holdings'] })
+      queryClient.invalidateQueries({ queryKey: ['tax'] })
+      setAccountId(''); setCategory(''); setDate(''); setAmount('')
+      reset()
+      onClose()
+    },
+  })
+
+  if (!holding) return null
+
+  const holdingId = holding.id
+  const symbol = holding.symbol === '—' ? '' : holding.symbol
+  const assetType = holding.assetType
+  const effectiveAccountId = accountId || accounts[0]?.id || ''
+  const effectiveCategory = category || defaultIncomeCategory(assetType)
+  const amountNum = parseFloat(amount) || 0
+  // Income is cash in. A negative payment isn't a dividend - a return of
+  // capital or a reversal is a different record - so it's rejected here.
+  const canSubmit = effectiveAccountId !== '' && date !== '' && amountNum > 0
+
+  function submit() {
+    mutate({
+      account_id: effectiveAccountId,
+      holding_id: holdingId,
+      symbol,
+      asset_type: assetType || null,
+      category: effectiveCategory,
+      payment_date: date,
+      amount: amountNum,
+    })
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4" onClick={onClose}>
+      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" />
+      <div
+        className="relative bg-surface-container-lowest rounded-xl shadow-card w-full max-w-md p-6"
+        onClick={(e) => e.stopPropagation()}
+        style={{ animation: 'slideUp 0.25s ease-out' }}
+      >
+        <div className="flex items-start justify-between mb-6">
+          <div>
+            <h2 className="text-headline-sm text-on-surface">Add Dividend</h2>
+            <p className="text-label-sm text-on-surface-variant">{holding.symbol}</p>
+          </div>
+          <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-lg text-on-surface-variant hover:bg-surface-container-high transition-colors">
+            <span className="material-symbols-outlined text-xl">close</span>
+          </button>
+        </div>
+
+        <div className="space-y-4">
+          <div>
+            <label className="block text-label-sm font-semibold text-on-surface mb-1.5">Account</label>
+            {accounts.length === 0 ? (
+              <p className="text-body-sm text-on-surface-variant">No accounts yet — create one first.</p>
+            ) : (
+              <select value={effectiveAccountId} onChange={(e) => setAccountId(e.target.value)} className={modalInputCls}>
+                {accounts.map((a) => <option key={a.id} value={a.id}>{a.account_name}</option>)}
+              </select>
+            )}
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-label-sm font-semibold text-on-surface mb-1.5">Type</label>
+              <select value={effectiveCategory} onChange={(e) => setCategory(e.target.value)} className={modalInputCls}>
+                {INCOME_CATEGORIES.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-label-sm font-semibold text-on-surface mb-1.5">Payment Date</label>
+              <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className={modalInputCls} />
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-label-sm font-semibold text-on-surface mb-1.5">Amount</label>
+            <div className="relative">
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-body-md text-on-surface-variant">$</span>
+              <input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0.00" className={`${modalNumInputCls} pl-7`} />
+            </div>
+            <p className="mt-1 text-label-sm text-on-surface-variant">
+              The cash actually paid. How it splits into qualified, ordinary, or exempt is a
+              jurisdiction's rule, worked out from this and the holding's tax class.
+            </p>
+          </div>
+        </div>
+
+        {error && <p className="mt-4 text-body-sm text-error">{(error as Error).message}</p>}
+
+        <div className="flex gap-3 mt-6">
+          <button onClick={onClose} disabled={isPending} className="flex-1 px-4 py-2.5 border border-outline-variant rounded-lg text-body-md text-on-surface hover:bg-surface-container-high transition-colors disabled:opacity-50">
+            Cancel
+          </button>
+          <button
+            onClick={submit}
+            disabled={isPending || !canSubmit}
+            className="flex-1 px-4 py-2.5 bg-primary text-on-primary rounded-lg text-body-md font-semibold hover:opacity-90 transition-opacity disabled:opacity-50"
+          >
+            {isPending ? 'Saving…' : 'Add Dividend'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function EditDividendModal({ dist, onClose }: { dist: ApiDistribution | null; onClose: () => void }) {
+  const queryClient = useQueryClient()
+  const { data: accountsData } = useQuery({
+    queryKey: ['accounts', 'select'],
+    queryFn: () => getAccounts(1, 100),
+    enabled: dist !== null,
+  })
+  const accounts = accountsData?.data ?? []
+
+  const [accountId, setAccountId] = useState(dist?.account_id ?? '')
+  const [category, setCategory] = useState(dist?.category ?? 'dividend')
+  // The API returns a timestamp; the date input wants the day alone.
+  const [date, setDate] = useState(dist?.payment_date?.slice(0, 10) ?? '')
+  const [amount, setAmount] = useState(String(dist?.amount ?? ''))
+
+  const { mutate, isPending, error } = useMutation({
+    mutationFn: ({ id, payload }: { id: string; payload: Parameters<typeof updateDistribution>[1] }) =>
+      updateDistribution(id, payload),
+    onSuccess: () => {
+      // The realized event and its treatment are rebuilt from the payment, so
+      // the income lists and the tax summary both go stale.
+      queryClient.invalidateQueries({ queryKey: ['distributions'] })
+      queryClient.invalidateQueries({ queryKey: ['holdings'] })
+      queryClient.invalidateQueries({ queryKey: ['tax'] })
+      onClose()
+    },
+  })
+
+  if (!dist) return null
+
+  // The paying security isn't editable here - moving a payment to a different
+  // holding is a different operation - so these ride along unchanged.
+  const { id, holding_id, symbol, asset_type } = dist
+  const amountNum = parseFloat(amount) || 0
+  const canSubmit = accountId !== '' && date !== '' && amountNum > 0
+
+  function submit() {
+    mutate({
+      id,
+      payload: {
+        account_id: accountId,
+        holding_id,
+        symbol,
+        asset_type,
+        category,
+        payment_date: date,
+        amount: amountNum,
+      },
+    })
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4" onClick={onClose}>
+      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" />
+      <div
+        className="relative bg-surface-container-lowest rounded-xl shadow-card w-full max-w-md p-6"
+        onClick={(e) => e.stopPropagation()}
+        style={{ animation: 'slideUp 0.25s ease-out' }}
+      >
+        <div className="flex items-start justify-between mb-6">
+          <div>
+            <h2 className="text-headline-sm text-on-surface">Edit Dividend</h2>
+            <p className="text-label-sm text-on-surface-variant">{dist.symbol || '—'}</p>
+          </div>
+          <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-lg text-on-surface-variant hover:bg-surface-container-high transition-colors">
+            <span className="material-symbols-outlined text-xl">close</span>
+          </button>
+        </div>
+
+        <div className="space-y-4">
+          <div>
+            <label className="block text-label-sm font-semibold text-on-surface mb-1.5">Account</label>
+            <select value={accountId} onChange={(e) => setAccountId(e.target.value)} className={modalInputCls}>
+              {accounts.map((a) => <option key={a.id} value={a.id}>{a.account_name}</option>)}
+            </select>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-label-sm font-semibold text-on-surface mb-1.5">Type</label>
+              <select value={category} onChange={(e) => setCategory(e.target.value)} className={modalInputCls}>
+                {INCOME_CATEGORIES.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-label-sm font-semibold text-on-surface mb-1.5">Payment Date</label>
+              <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className={modalInputCls} />
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-label-sm font-semibold text-on-surface mb-1.5">Amount</label>
+            <div className="relative">
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-body-md text-on-surface-variant">$</span>
+              <input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0.00" className={`${modalNumInputCls} pl-7`} />
+            </div>
+          </div>
+        </div>
+
+        {error && <p className="mt-4 text-body-sm text-error">{(error as Error).message}</p>}
+
+        <div className="flex gap-3 mt-6">
+          <button onClick={onClose} disabled={isPending} className="flex-1 px-4 py-2.5 border border-outline-variant rounded-lg text-body-md text-on-surface hover:bg-surface-container-high transition-colors disabled:opacity-50">
+            Cancel
+          </button>
+          <button
+            onClick={submit}
+            disabled={isPending || !canSubmit}
+            className="flex-1 px-4 py-2.5 bg-primary text-on-primary rounded-lg text-body-md font-semibold hover:opacity-90 transition-opacity disabled:opacity-50"
+          >
+            {isPending ? 'Saving…' : 'Save Changes'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default function Portfolio() {
   const [mounted, setMounted] = useState(false)
   const [sort, setSort] = useState<{ field: HoldingSortField; direction: SortDirection }>({
@@ -1578,6 +1913,8 @@ export default function Portfolio() {
   const [editingLot, setEditingLot] = useState<ApiTaxLot | null>(null)
   const [addTxnHolding, setAddTxnHolding] = useState<{ id: string; symbol: string } | null>(null)
   const [editingTxn, setEditingTxn] = useState<ApiTransaction | null>(null)
+  const [addDistHolding, setAddDistHolding] = useState<DividendTarget | null>(null)
+  const [editingDist, setEditingDist] = useState<ApiDistribution | null>(null)
 
   const { data, isLoading, isError, error } = useQuery({
     queryKey: ['holdings', pagination.pageIndex, pagination.pageSize, sort.field, sort.direction, statusFilter],
@@ -1850,6 +2187,8 @@ export default function Portfolio() {
                               onEditLot={setEditingLot}
                               onAddTransaction={() => setAddTxnHolding({ id: h.id, symbol: h.symbol })}
                               onEditTransaction={setEditingTxn}
+                              onAddDividend={() => setAddDistHolding({ id: h.id, symbol: h.symbol, assetType: h.assetType })}
+                              onEditDividend={setEditingDist}
                             />
                           </td>
                         </tr>
@@ -1903,6 +2242,8 @@ export default function Portfolio() {
       <EditTaxLotModal key={editingLot?.id} lot={editingLot} onClose={() => setEditingLot(null)} />
       <AddTransactionModal key={addTxnHolding?.id} holding={addTxnHolding} onClose={() => setAddTxnHolding(null)} />
       <EditTransactionModal key={editingTxn?.id} txn={editingTxn} onClose={() => setEditingTxn(null)} />
+      <AddDividendModal key={addDistHolding?.id} holding={addDistHolding} onClose={() => setAddDistHolding(null)} />
+      <EditDividendModal key={editingDist?.id} dist={editingDist} onClose={() => setEditingDist(null)} />
     </>
   )
 }
