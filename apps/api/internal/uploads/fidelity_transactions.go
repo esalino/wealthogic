@@ -355,14 +355,9 @@ func (h *fidelityTransactionsHandler) Process(db *gorm.DB, file io.Reader, opts 
 
 	err := db.Transaction(func(tx *gorm.DB) error {
 		// Log the import itself; every row's UploadTransaction links to it.
-		upload := models.Upload{
-			FileName:  opts.FileName,
-			AccountID: opts.AccountID,
-			StartDate: startDate,
-			EndDate:   endDate,
-		}
-		if err := tx.Create(&upload).Error; err != nil {
-			return fmt.Errorf("failed to create upload: %w", err)
+		upload, err := recordUpload(tx, FileTypeTransactions, opts, startDate, endDate)
+		if err != nil {
+			return err
 		}
 
 		// Holdings that got new lots and need their aggregates recomputed.

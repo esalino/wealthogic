@@ -16,9 +16,15 @@ export interface UploadParams {
 export interface Upload {
   id: string
   file_name: string
+  // 'holdings' | 'transactions'. Empty on rows imported before the kind was
+  // recorded, which the UI shows as unknown rather than guessing.
+  file_type: string
+  // Both null for a positions snapshot, which covers a moment rather than a span.
   start_date: string | null
   end_date: string | null
   account_id: string
+  // Resolved server-side; empty when the account is gone or was never set.
+  account_name: string
   created_at: string
   updated_at: string
 }

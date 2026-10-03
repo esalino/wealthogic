@@ -179,6 +179,16 @@ func (h *fidelityHoldingsHandler) Process(db *gorm.DB, file io.Reader, opts Opti
 	if !sawHeader {
 		return nil, wrongFileError("holdings")
 	}
+
+	// Log the file now that it's been recognized and read. A positions export
+	// produces no UploadTransaction rows, so this Upload row is the only record
+	// that the import happened - without it the file leaves no trace in history.
+	//
+	// It carries no date range: a positions file is a snapshot of one moment,
+	// not a span of activity.
+	if _, err := recordUpload(db, FileTypeHoldings, opts, nil, nil); err != nil {
+		return nil, err
+	}
 	return result, nil
 }
 

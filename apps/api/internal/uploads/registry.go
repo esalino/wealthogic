@@ -45,8 +45,8 @@ type Registry struct {
 
 func NewRegistry() *Registry {
 	r := &Registry{handlers: map[string]FileHandler{}}
-	r.register("holdings", "fidelity", &fidelityHoldingsHandler{})
-	r.register("transactions", "fidelity", &fidelityTransactionsHandler{})
+	r.register(FileTypeHoldings, "fidelity", &fidelityHoldingsHandler{})
+	r.register(FileTypeTransactions, "fidelity", &fidelityTransactionsHandler{})
 	return r
 }
 

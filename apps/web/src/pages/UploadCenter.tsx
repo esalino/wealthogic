@@ -24,6 +24,30 @@ const fmtCurrency = (n: number) => (n ?? 0).toLocaleString('en-US', { style: 'cu
 const fmtNumber = (n: number) => (n ?? 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 const fmtSignedCurrency = (n: number) => `${(n ?? 0) < 0 ? '-' : '+'}${fmtCurrency(Math.abs(n ?? 0))}`
 
+// Data types the import records. A row from before the kind was recorded has an
+// empty file_type, which reads as unknown rather than being guessed at.
+const DATA_TYPE_LABELS: Record<string, string> = {
+  holdings: 'Positions',
+  transactions: 'Transactions',
+}
+
+function dataTypeChip(fileType: string) {
+  const label = DATA_TYPE_LABELS[fileType]
+  if (!label) return <span className="text-body-md text-on-surface-variant">—</span>
+
+  // Positions and transactions are different kinds of import, not a ranking, so
+  // the two chips differ in hue only - neither reads as better than the other.
+  const tone =
+    fileType === 'holdings'
+      ? 'bg-surface-container-high text-on-surface-variant'
+      : 'bg-secondary-container text-on-secondary-container'
+  return (
+    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-label-sm font-semibold ${tone}`}>
+      {label}
+    </span>
+  )
+}
+
 function amountColor(n: number) {
   if (n < 0) return 'text-error'
   if (n > 0) return 'text-secondary'
@@ -118,13 +142,15 @@ export default function UploadCenter() {
                 <tr className="border-b border-outline-variant">
                   <th className="text-left px-6 py-3 text-label-caps text-on-surface-variant uppercase">Uploaded</th>
                   <th className="text-left px-6 py-3 text-label-caps text-on-surface-variant uppercase">File Name</th>
+                  <th className="text-left px-6 py-3 text-label-caps text-on-surface-variant uppercase">Account</th>
+                  <th className="text-left px-6 py-3 text-label-caps text-on-surface-variant uppercase">Data Type</th>
                   <th className="text-right px-6 py-3 text-label-caps text-on-surface-variant uppercase">Date Range</th>
                 </tr>
               </thead>
               <tbody>
-                {uploadsQuery.isLoading && <StateRow colSpan={3}>Loading uploads…</StateRow>}
-                {uploadsQuery.isError && <StateRow colSpan={3}><span className="text-error">Failed to load uploads.</span></StateRow>}
-                {!uploadsQuery.isLoading && !uploadsQuery.isError && uploads.length === 0 && <StateRow colSpan={3}>No uploads yet.</StateRow>}
+                {uploadsQuery.isLoading && <StateRow colSpan={5}>Loading uploads…</StateRow>}
+                {uploadsQuery.isError && <StateRow colSpan={5}><span className="text-error">Failed to load uploads.</span></StateRow>}
+                {!uploadsQuery.isLoading && !uploadsQuery.isError && uploads.length === 0 && <StateRow colSpan={5}>No uploads yet.</StateRow>}
                 {uploads.map((row) => (
                   <tr key={row.id} className="border-b border-outline-variant last:border-0 hover:bg-surface-container-low transition-colors">
                     <td className="px-6 py-4 text-body-md text-on-surface-variant tabular-nums whitespace-nowrap">{fmtDate(row.created_at)}</td>
@@ -134,6 +160,8 @@ export default function UploadCenter() {
                         <span className="text-body-md text-on-surface">{row.file_name}</span>
                       </div>
                     </td>
+                    <td className="px-6 py-4 text-body-md text-on-surface whitespace-nowrap">{row.account_name || '—'}</td>
+                    <td className="px-6 py-4">{dataTypeChip(row.file_type)}</td>
                     <td className="px-6 py-4 text-right text-body-md text-on-surface-variant tabular-nums whitespace-nowrap">{fmtRange(row.start_date, row.end_date)}</td>
                   </tr>
                 ))}

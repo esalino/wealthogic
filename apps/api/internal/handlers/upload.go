@@ -95,12 +95,53 @@ func (h *uploadHandler) Upload(c *gin.Context) {
 	c.JSON(http.StatusOK, result)
 }
 
+// uploadRecord is an Upload as history shows it: the file, plus the name of the
+// account it was imported into. The id is what the row stores, but a name is
+// what a reader recognizes.
+type uploadRecord struct {
+	models.Upload
+	AccountName string `json:"account_name"`
+} // @name UploadRecord
+
 type paginatedUploads struct {
-	Data     []models.Upload `json:"data"`
-	Total    int64           `json:"total"`
-	Page     int             `json:"page"`
-	PageSize int             `json:"page_size"`
+	Data     []uploadRecord `json:"data"`
+	Total    int64          `json:"total"`
+	Page     int            `json:"page"`
+	PageSize int            `json:"page_size"`
 } // @name PaginatedUploads
+
+// withAccountNames pairs each upload with its account's name, looking the names
+// up in one query rather than per row. An upload whose account is missing (or
+// which was imported without one) keeps an empty name, which the UI renders as
+// unknown rather than as a bare uuid.
+func (h *uploadHandler) withAccountNames(ups []models.Upload) ([]uploadRecord, error) {
+	ids := make([]uuid.UUID, 0, len(ups))
+	seen := map[uuid.UUID]bool{}
+	for _, u := range ups {
+		if u.AccountID == uuid.Nil || seen[u.AccountID] {
+			continue
+		}
+		seen[u.AccountID] = true
+		ids = append(ids, u.AccountID)
+	}
+
+	names := map[uuid.UUID]string{}
+	if len(ids) > 0 {
+		var accounts []models.Account
+		if err := h.db.Select("id", "account_name").Find(&accounts, "id IN ?", ids).Error; err != nil {
+			return nil, err
+		}
+		for _, a := range accounts {
+			names[a.ID] = a.AccountName
+		}
+	}
+
+	records := make([]uploadRecord, 0, len(ups))
+	for _, u := range ups {
+		records = append(records, uploadRecord{Upload: u, AccountName: names[u.AccountID]})
+	}
+	return records, nil
+}
 
 // GetUploads godoc
 // @Summary      List uploads with pagination
@@ -136,8 +177,14 @@ func (h *uploadHandler) GetUploads(c *gin.Context) {
 		return
 	}
 
+	records, err := h.withAccountNames(uploads)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch uploads"})
+		return
+	}
+
 	c.JSON(http.StatusOK, paginatedUploads{
-		Data:     uploads,
+		Data:     records,
 		Total:    total,
 		Page:     page,
 		PageSize: pageSize,

@@ -113,7 +113,7 @@ export default function Sidebar({ pinned, onPinnedChange }: SidebarProps) {
           </div>
           {expanded && (
             <div className="min-w-0">
-              <p className="text-body-md font-semibold text-on-surface truncate">Alex Sterling</p>
+              <p className="text-body-md font-semibold text-on-surface truncate">Erik Salino</p>
               <p className="text-label-sm text-on-surface-variant truncate">Premium Member</p>
             </div>
           )}
