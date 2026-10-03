@@ -77,9 +77,9 @@ export default function Dashboard() {
 
       {/* Bento grid row 1 */}
       <div className="grid grid-cols-12 gap-6 mb-6">
-        {/* Total Net Worth card */}
+        {/* Total portfolio value card */}
         <div className="col-span-12 lg:col-span-7 bg-surface-container-lowest rounded-xl shadow-card p-6">
-          <p className="text-label-caps text-on-surface-variant uppercase mb-1">Total Net Worth</p>
+          <p className="text-label-caps text-on-surface-variant uppercase mb-1">Total Portfolio Value</p>
           <div className="flex items-baseline gap-3 mb-1">
             <span className="text-headline-lg text-on-surface tabular-nums">$2,845,920.42</span>
             <span className="text-label-sm font-semibold text-secondary">+4.2% vs last month</span>

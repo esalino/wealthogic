@@ -27,7 +27,7 @@ export default function TopNav({ pinned }: { pinned: boolean }) {
         {/* User */}
         <div className="hidden md:flex items-center gap-3">
           <div className="text-right">
-            <p className="text-body-md font-semibold text-on-surface leading-none">Alex Sterling</p>
+            <p className="text-body-md font-semibold text-on-surface leading-none">Erik Salino</p>
             <p className="text-label-sm text-on-surface-variant">Premium Member</p>
           </div>
           <div className="w-9 h-9 rounded-full bg-primary-container flex items-center justify-center flex-shrink-0">

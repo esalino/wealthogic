@@ -1967,6 +1967,9 @@ export default function Portfolio() {
   const sectors = allocationData?.equity_sectors ?? []
   const equityValue = allocationData?.equity_value ?? 0
   const equityPct = allocationData?.equity_percent ?? 0
+  // The market value of every holding, not just the page on screen - the
+  // allocation endpoint already sums the whole portfolio to weight its slices.
+  const portfolioValue = allocationData?.total_value ?? 0
   // Allocation is computed relative to the market value of the holdings on the
   // current page — a stand-in until a portfolio-total endpoint exists.
   const totalMarketValue = holdings.reduce((sum, h) => sum + (h.current_value ?? 0), 0)
@@ -1982,7 +1985,9 @@ export default function Portfolio() {
         <div className="flex items-start justify-between mb-8">
           <div>
             <h1 className="text-headline-lg text-on-surface mb-1">Portfolio Breakdown</h1>
-            <p className="text-body-lg text-on-surface-variant">Detailed analysis of your $2,482,190.00 net worth.</p>
+            <p className="text-body-lg text-on-surface-variant">
+              Detailed analysis of your {fmtCurrency(portfolioValue)} portfolio.
+            </p>
           </div>
           <div className="flex gap-3">
             <button className="flex items-center gap-2 px-4 py-2 border border-outline-variant rounded-lg text-body-md text-on-surface hover:bg-surface-container-high transition-colors">
