@@ -16,20 +16,90 @@ import (
 	"gorm.io/gorm"
 )
 
-// Column indices in a Fidelity "Accounts_History" (transactions) export.
+// Column names in a Fidelity "Accounts_History" (transactions) export, as
+// normalizeColumn renders them. The export's shape varies by account - a
+// brokerage history carries currency and exchange-rate columns that a
+// retirement account's history omits, shifting every column after Type - so
+// these are looked up in the header rather than assumed to sit at fixed
+// positions.
 const (
-	txnColRunDate        = 0
-	txnColAction         = 1
-	txnColSymbol         = 2
-	txnColDescription    = 3
-	txnColPrice          = 8
-	txnColQuantity       = 9
-	txnColCommission     = 11
-	txnColFees           = 12
-	txnColAmount         = 14
-	txnColSettlementDate = 16
-	txnMinColumns        = 17
+	txnHeaderRunDate        = "run date"
+	txnHeaderAction         = "action"
+	txnHeaderSymbol         = "symbol"
+	txnHeaderDescription    = "description"
+	txnHeaderPrice          = "price"
+	txnHeaderQuantity       = "quantity"
+	txnHeaderCommission     = "commission"
+	txnHeaderFees           = "fees"
+	txnHeaderAmount         = "amount"
+	txnHeaderSettlementDate = "settlement date"
 )
+
+// txnColumns is where one export keeps each column an import reads. An
+// optional column that the file doesn't carry is -1.
+type txnColumns struct {
+	runDate        int
+	action         int
+	symbol         int
+	description    int
+	price          int
+	quantity       int
+	commission     int
+	fees           int
+	amount         int
+	settlementDate int
+
+	// lastRequired is the rightmost column a row must reach to be a
+	// transaction at all, which is how the export's trailing disclaimer - real
+	// CSV rows, just far too short - is told apart from data.
+	lastRequired int
+}
+
+// resolveTxnColumns locates each column the import reads in a header row.
+//
+// The identifying columns are required: without a date, an action, a quantity
+// or an amount there is no transaction in the row. Price, commission, fees and
+// settlement date are optional, because a dividend or an expiration genuinely
+// has none, and because an export that drops a column should still import.
+func resolveTxnColumns(record []string) (*txnColumns, error) {
+	cols := indexColumns(record)
+
+	required := []string{
+		txnHeaderRunDate, txnHeaderAction, txnHeaderSymbol,
+		txnHeaderDescription, txnHeaderQuantity, txnHeaderAmount,
+	}
+	var missing []string
+	for _, name := range required {
+		if _, ok := cols[name]; !ok {
+			missing = append(missing, name)
+		}
+	}
+	if len(missing) > 0 {
+		return nil, fmt.Errorf(
+			"this transactions export is missing the %s column(s) - it may be a "+
+				"format this import doesn't handle yet",
+			strings.Join(missing, ", "))
+	}
+
+	c := &txnColumns{
+		runDate:        cols[txnHeaderRunDate],
+		action:         cols[txnHeaderAction],
+		symbol:         cols[txnHeaderSymbol],
+		description:    cols[txnHeaderDescription],
+		quantity:       cols[txnHeaderQuantity],
+		amount:         cols[txnHeaderAmount],
+		price:          optionalColumn(cols, txnHeaderPrice),
+		commission:     optionalColumn(cols, txnHeaderCommission),
+		fees:           optionalColumn(cols, txnHeaderFees),
+		settlementDate: optionalColumn(cols, txnHeaderSettlementDate),
+	}
+	for _, i := range []int{c.runDate, c.action, c.symbol, c.description, c.quantity, c.amount} {
+		if i > c.lastRequired {
+			c.lastRequired = i
+		}
+	}
+	return c, nil
+}
 
 const fidelityDateLayout = "01/02/2006"
 
@@ -162,8 +232,10 @@ func (h *fidelityTransactionsHandler) Process(db *gorm.DB, file io.Reader, opts 
 	var rows []parsedRow
 	var minDate, maxDate time.Time
 	// A positions export parses as transactions without error, so require this
-	// file's own header before trusting a single row of it.
+	// file's own header before trusting a single row of it. The header is also
+	// what says where each column is.
 	var sawHeader bool
+	var cols *txnColumns
 	for {
 		record, err := reader.Read()
 		if errors.Is(err, io.EOF) {
@@ -178,17 +250,21 @@ func (h *fidelityTransactionsHandler) Process(db *gorm.DB, file io.Reader, opts 
 				result.Skipped++
 				continue
 			}
+			cols, err = resolveTxnColumns(record)
+			if err != nil {
+				return nil, err
+			}
 			sawHeader = true
 			continue
 		}
 
-		if len(record) < txnMinColumns {
+		if len(record) <= cols.lastRequired {
 			result.Skipped++
 			continue
 		}
 
-		runDate := strings.TrimSpace(record[txnColRunDate])
-		rawAction := strings.TrimSpace(record[txnColAction])
+		runDate := field(record, cols.runDate)
+		rawAction := field(record, cols.action)
 		if runDate == "" || runDate == "Run Date" || rawAction == "" {
 			result.Skipped++
 			continue
@@ -207,8 +283,8 @@ func (h *fidelityTransactionsHandler) Process(db *gorm.DB, file io.Reader, opts 
 			maxDate = date
 		}
 
-		symbol := strings.TrimSuffix(strings.TrimSpace(record[txnColSymbol]), "**")
-		description := strings.TrimSpace(record[txnColDescription])
+		symbol := strings.TrimSuffix(field(record, cols.symbol), "**")
+		description := field(record, cols.description)
 
 		// Cash movements (transfers, EFTs) have no underlying security, so
 		// there's no description to derive an asset type from - leave both
@@ -220,9 +296,9 @@ func (h *fidelityTransactionsHandler) Process(db *gorm.DB, file io.Reader, opts 
 			assetDescription = &description
 		}
 
-		quantity := parseDollarPtr(record[txnColQuantity])
-		price := parseDollarPtr(record[txnColPrice])
-		amount := parseDollar(record[txnColAmount])
+		quantity := parseDollarPtr(field(record, cols.quantity))
+		price := parseDollarPtr(field(record, cols.price))
+		amount := parseDollar(field(record, cols.amount))
 
 		// Treasuries quote price per $100 of face value while quantity is the
 		// face value, so the raw price is off by scale. Derive the effective
@@ -252,9 +328,9 @@ func (h *fidelityTransactionsHandler) Process(db *gorm.DB, file io.Reader, opts 
 				Quantity:         quantity,
 				Price:            price,
 				Amount:           amount,
-				Commission:       parseDollar(record[txnColCommission]),
-				Fees:             parseDollar(record[txnColFees]),
-				SettlementDate:   parseDatePtr(record[txnColSettlementDate]),
+				Commission:       parseDollar(field(record, cols.commission)),
+				Fees:             parseDollar(field(record, cols.fees)),
+				SettlementDate:   parseDatePtr(field(record, cols.settlementDate)),
 			},
 		})
 	}

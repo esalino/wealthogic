@@ -87,3 +87,149 @@ func TestMapAction(t *testing.T) {
 		})
 	}
 }
+
+// The two Fidelity transaction layouts seen in real exports. The brokerage one
+// carries currency and exchange-rate columns and labels money columns plainly;
+// the retirement one drops those four columns - shifting everything after Type
+// four places left - and suffixes money columns with "($)". Reading by fixed
+// position silently skipped every row of the retirement export, so both
+// layouts are pinned here.
+var (
+	brokerageTxnHeader = []string{
+		"Run Date", "Action", "Symbol", "Description", "Type",
+		"Exchange Quantity", "Exchange Currency", "Currency", "Price", "Quantity",
+		"Exchange Rate", "Commission", "Fees", "Accrued Interest", "Amount",
+		"Cash Balance", "Settlement Date",
+	}
+	retirementTxnHeader = []string{
+		"Run Date", "Action", "Symbol", "Description", "Type", "Price ($)",
+		"Quantity", "Commission ($)", "Fees ($)", "Accrued Interest ($)",
+		"Amount ($)", "Cash Balance ($)", "Settlement Date",
+	}
+)
+
+func TestResolveTxnColumns(t *testing.T) {
+	tests := []struct {
+		name   string
+		header []string
+		want   txnColumns
+	}{
+		{
+			name:   "brokerage export",
+			header: brokerageTxnHeader,
+			want: txnColumns{
+				runDate: 0, action: 1, symbol: 2, description: 3,
+				price: 8, quantity: 9, commission: 11, fees: 12,
+				amount: 14, settlementDate: 16, lastRequired: 14,
+			},
+		},
+		{
+			name:   "retirement export drops the currency columns",
+			header: retirementTxnHeader,
+			want: txnColumns{
+				runDate: 0, action: 1, symbol: 2, description: 3,
+				price: 5, quantity: 6, commission: 7, fees: 8,
+				amount: 10, settlementDate: 12, lastRequired: 10,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := resolveTxnColumns(tt.header)
+			if err != nil {
+				t.Fatalf("resolveTxnColumns() error = %v", err)
+			}
+			if *got != tt.want {
+				t.Errorf("resolveTxnColumns() = %+v, want %+v", *got, tt.want)
+			}
+		})
+	}
+}
+
+// An export missing a column the import can't do without must say so rather
+// than import zero rows and report success, which is how the retirement export
+// failed before columns were resolved by name.
+func TestResolveTxnColumnsRequiresIdentifyingColumns(t *testing.T) {
+	header := []string{"Run Date", "Action", "Symbol", "Description", "Type", "Price ($)"}
+	if _, err := resolveTxnColumns(header); err == nil {
+		t.Fatal("resolveTxnColumns() with no quantity or amount column: want error, got nil")
+	}
+}
+
+// Optional columns are genuinely optional: an export without them still
+// imports, and their absence reads as "no value" rather than panicking.
+func TestResolveTxnColumnsOptionalColumnsAbsent(t *testing.T) {
+	header := []string{"Run Date", "Action", "Symbol", "Description", "Quantity", "Amount"}
+	cols, err := resolveTxnColumns(header)
+	if err != nil {
+		t.Fatalf("resolveTxnColumns() error = %v", err)
+	}
+	for name, idx := range map[string]int{
+		"price": cols.price, "commission": cols.commission,
+		"fees": cols.fees, "settlementDate": cols.settlementDate,
+	} {
+		if idx != -1 {
+			t.Errorf("%s = %d, want -1", name, idx)
+		}
+	}
+	row := []string{"08/25/2026", "YOU BOUGHT CHEVRON CORP NEW COM (CVX)", "CVX", "CHEVRON CORP NEW COM", "100", "-18032.99"}
+	if got := field(row, cols.price); got != "" {
+		t.Errorf("field(price) = %q, want empty", got)
+	}
+	if got := parseDatePtr(field(row, cols.settlementDate)); got != nil {
+		t.Errorf("settlement date = %v, want nil", got)
+	}
+}
+
+// A row of the retirement export, read through the resolved columns. Before the
+// fix these values came from whatever happened to sit at the brokerage layout's
+// positions - and the row was dropped outright for being too short.
+func TestRetirementExportRowReadsThroughColumns(t *testing.T) {
+	cols, err := resolveTxnColumns(retirementTxnHeader)
+	if err != nil {
+		t.Fatalf("resolveTxnColumns() error = %v", err)
+	}
+	row := []string{
+		"08/11/2026", "YOU SOLD CHEVRON CORP NEW COM (CVX) (Cash)", "CVX",
+		"CHEVRON CORP NEW COM", "Cash", "196.15", "-100", "", "0.41", "",
+		"19614.09", "466868.66", "08/12/2026",
+	}
+
+	if got := field(row, cols.symbol); got != "CVX" {
+		t.Errorf("symbol = %q, want CVX", got)
+	}
+	if got := parseDollarPtr(field(row, cols.quantity)); got == nil || *got != -100 {
+		t.Errorf("quantity = %v, want -100", got)
+	}
+	if got := parseDollarPtr(field(row, cols.price)); got == nil || *got != 196.15 {
+		t.Errorf("price = %v, want 196.15", got)
+	}
+	if got := parseDollar(field(row, cols.amount)); got != 19614.09 {
+		t.Errorf("amount = %v, want 19614.09", got)
+	}
+	if got := parseDollar(field(row, cols.fees)); got != 0.41 {
+		t.Errorf("fees = %v, want 0.41", got)
+	}
+	if got := parseDollar(field(row, cols.commission)); got != 0 {
+		t.Errorf("commission = %v, want 0", got)
+	}
+	settled := parseDatePtr(field(row, cols.settlementDate))
+	if settled == nil || settled.Format(fidelityDateLayout) != "08/12/2026" {
+		t.Errorf("settlement date = %v, want 08/12/2026", settled)
+	}
+}
+
+func TestNormalizeColumn(t *testing.T) {
+	tests := map[string]string{
+		"Amount ($)":           "amount",
+		"  Run Date  ":         "run date",
+		"\ufeffAccount number": "account number",
+		"Settlement Date":      "settlement date",
+	}
+	for in, want := range tests {
+		if got := normalizeColumn(in); got != want {
+			t.Errorf("normalizeColumn(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

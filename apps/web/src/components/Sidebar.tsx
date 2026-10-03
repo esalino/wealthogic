@@ -11,7 +11,7 @@ const navItems: NavItem[] = [
   { to: '/dashboard', icon: 'dashboard', label: 'Dashboard' },
   { to: '/accounts', icon: 'account_balance', label: 'Accounts' },
   { to: '/upload', icon: 'cloud_upload', label: 'Upload Center' },
-  { to: '/portfolio', icon: 'pie_chart', label: 'Breakdown' },
+  { to: '/portfolio', icon: 'pie_chart', label: 'Portfolio' },
   { to: '/tax', icon: 'receipt_long', label: 'Tax Center' },
 ]
 
