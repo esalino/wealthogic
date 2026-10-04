@@ -728,6 +728,14 @@ definitions:
     properties:
       country_code:
         type: string
+      effective_from:
+        description: |-
+          EffectiveFrom is when this residency started, as a plain date
+          (YYYY-MM-DD). The client sends its own calendar date because only it
+          knows what "today" means where the user is: at 9pm in California it is
+          already tomorrow in UTC, so a server-side "today" would record a date the
+          user hasn't reached. Omitted, it falls back to the UTC date.
+        type: string
       region_code:
         type: string
       user_id:

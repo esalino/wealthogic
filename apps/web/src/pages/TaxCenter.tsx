@@ -6,12 +6,16 @@ import {
   type JurisdictionSummary,
   type TaxTreatment,
 } from '../api/tax'
+import { formatDate } from '../lib/datetime'
 
 const PAGE_SIZES = [10, 20, 50]
 
 // Recent tax years for the selector; the data drives what actually shows.
+// The current year is read in local time: on the evening of Dec 31 in the US the
+// UTC year has already rolled over, which would default the page to a year with
+// nothing realized in it yet.
 const now = new Date()
-const YEARS = Array.from({ length: 5 }, (_, i) => now.getUTCFullYear() - i)
+const YEARS = Array.from({ length: 5 }, (_, i) => now.getFullYear() - i)
 
 interface Pagination {
   pageIndex: number
@@ -20,8 +24,6 @@ interface Pagination {
 
 const fmtCurrency = (n: number) => (n ?? 0).toLocaleString('en-US', { style: 'currency', currency: 'USD' })
 const fmtSigned = (n: number) => `${(n ?? 0) < 0 ? '-' : '+'}${fmtCurrency(Math.abs(n ?? 0))}`
-const fmtDate = (iso: string) =>
-  new Date(iso).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: '2-digit', timeZone: 'UTC' })
 
 function gainColor(n: number) {
   if (n < 0) return 'text-error'
@@ -236,7 +238,7 @@ function TablePagination({ page, setPage, total }: { page: Pagination; setPage: 
 }
 
 export default function TaxCenter() {
-  const [year, setYear] = useState(now.getUTCFullYear())
+  const [year, setYear] = useState(now.getFullYear())
   const [category, setCategory] = useState('')
   const [page, setPage] = useState<Pagination>({ pageIndex: 0, pageSize: 10 })
 
@@ -369,7 +371,7 @@ export default function TaxCenter() {
                         <span className="text-label-sm text-on-surface-variant">{g.asset_type || '—'}</span>
                       </div>
                     </td>
-                    <td className="px-6 py-4 text-body-md text-on-surface-variant tabular-nums whitespace-nowrap">{fmtDate(g.event_date)}</td>
+                    <td className="px-6 py-4 text-body-md text-on-surface-variant tabular-nums whitespace-nowrap">{formatDate(g.event_date)}</td>
                     <td className="px-6 py-4">
                       <div className="flex items-center gap-2">
                         {isCapital && (

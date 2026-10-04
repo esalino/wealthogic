@@ -334,6 +334,13 @@ type taxProfileRequest struct {
 	UserID      string  `json:"user_id" binding:"required"`
 	CountryCode string  `json:"country_code" binding:"required"`
 	RegionCode  *string `json:"region_code"`
+
+	// EffectiveFrom is when this residency started, as a plain date
+	// (YYYY-MM-DD). The client sends its own calendar date because only it
+	// knows what "today" means where the user is: at 9pm in California it is
+	// already tomorrow in UTC, so a server-side "today" would record a date the
+	// user hasn't reached. Omitted, it falls back to the UTC date.
+	EffectiveFrom string `json:"effective_from"`
 } // @name TaxProfileRequest
 
 // GetProfiles godoc
@@ -396,12 +403,24 @@ func (h *taxHandler) PutProfile(c *gin.Context) {
 		return
 	}
 
+	// effective_from is a date column, so what matters is the calendar day, not
+	// an instant. Prefer the client's own date; fall back to the UTC one.
+	effectiveFrom := time.Now().UTC().Truncate(24 * time.Hour)
+	if req.EffectiveFrom != "" {
+		parsed, err := parseInputDate(req.EffectiveFrom)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid effective_from; expected YYYY-MM-DD"})
+			return
+		}
+		effectiveFrom = parsed
+	}
+
 	var profile models.TaxProfile
 	err = h.db.Where("user_id = ?", userID).First(&profile).Error
 	switch {
 	case err == nil:
 	case errors.Is(err, gorm.ErrRecordNotFound):
-		profile = models.TaxProfile{UserID: userID, EffectiveFrom: time.Now().UTC()}
+		profile = models.TaxProfile{UserID: userID}
 	default:
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch tax profile"})
 		return
@@ -409,9 +428,7 @@ func (h *taxHandler) PutProfile(c *gin.Context) {
 
 	profile.CountryCode = req.CountryCode
 	profile.RegionCode = req.RegionCode
-	if profile.EffectiveFrom.IsZero() {
-		profile.EffectiveFrom = time.Now().UTC()
-	}
+	profile.EffectiveFrom = effectiveFrom
 
 	if err := h.db.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Save(&profile).Error; err != nil {

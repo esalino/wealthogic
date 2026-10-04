@@ -168,3 +168,61 @@ export async function getRealizedEvents(
 
   return res.json()
 }
+
+// Where a person is taxed: a country and, where the country taxes regionally, a
+// region. It resolves to the ordered list of jurisdictions whose rules apply to
+// that person's realized income, and hangs off the user rather than the account
+// because residency belongs to the person.
+export interface TaxProfile {
+  id: string
+  user_id: string
+  country_code: string
+  // Null where the country has no regional income tax, or the person isn't
+  // subject to one.
+  region_code: string | null
+  effective_from: string
+  created_at: string
+  updated_at: string
+}
+
+// Empty until a residency is saved. The server then falls back to a default
+// (US / US-CA) rather than leaving events untreated, so no profile does not
+// mean no tax treatment - see tax.DefaultProfile on the API side.
+export async function getTaxProfiles(): Promise<TaxProfile[]> {
+  const res = await fetch(`${API_BASE}/tax/profiles`)
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.error ?? 'Failed to fetch tax profiles')
+  }
+
+  return res.json()
+}
+
+export interface TaxProfilePayload {
+  user_id: string
+  country_code: string
+  region_code: string | null
+  // The viewer's own calendar date (YYYY-MM-DD). Sent because only the browser
+  // knows what "today" means where the user is - a server-side UTC "today" is
+  // already tomorrow for an evening save in the US.
+  effective_from: string
+}
+
+// Saving rebuilds every existing tax treatment in the same transaction:
+// residency decides which rules an event is evaluated against, so changing it
+// changes the answer for everything already realized.
+export async function putTaxProfile(payload: TaxProfilePayload): Promise<TaxProfile> {
+  const res = await fetch(`${API_BASE}/tax/profiles`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.error ?? 'Failed to save tax residency')
+  }
+
+  return res.json()
+}

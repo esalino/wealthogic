@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { getUploads, getUploadTransactions } from '../api/uploads'
+import { formatDate, formatDateTime } from '../lib/datetime'
 
 const PAGE_SIZES = [10, 20, 50]
 
@@ -9,15 +10,11 @@ interface Pagination {
   pageSize: number
 }
 
-// Date-only columns are stored at UTC midnight; format in UTC so they don't slip
-// a day in western timezones.
-const fmtDate = (iso: string) =>
-  new Date(iso).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: '2-digit', timeZone: 'UTC' })
 
 function fmtRange(start: string | null, end: string | null) {
   if (!start && !end) return '—'
-  if (start && end) return `${fmtDate(start)} – ${fmtDate(end)}`
-  return fmtDate((start ?? end)!)
+  if (start && end) return `${formatDate(start)} – ${formatDate(end)}`
+  return formatDate((start ?? end)!)
 }
 
 const fmtCurrency = (n: number) => (n ?? 0).toLocaleString('en-US', { style: 'currency', currency: 'USD' })
@@ -153,7 +150,7 @@ export default function UploadCenter() {
                 {!uploadsQuery.isLoading && !uploadsQuery.isError && uploads.length === 0 && <StateRow colSpan={5}>No uploads yet.</StateRow>}
                 {uploads.map((row) => (
                   <tr key={row.id} className="border-b border-outline-variant last:border-0 hover:bg-surface-container-low transition-colors">
-                    <td className="px-6 py-4 text-body-md text-on-surface-variant tabular-nums whitespace-nowrap">{fmtDate(row.created_at)}</td>
+                    <td className="px-6 py-4 text-body-md text-on-surface-variant tabular-nums whitespace-nowrap">{formatDateTime(row.created_at)}</td>
                     <td className="px-6 py-4">
                       <div className="flex items-center gap-2">
                         <span className="material-symbols-outlined text-on-surface-variant text-base">description</span>
@@ -194,7 +191,7 @@ export default function UploadCenter() {
                 {!txnsQuery.isLoading && !txnsQuery.isError && txns.length === 0 && <StateRow colSpan={6}>No upload transactions yet.</StateRow>}
                 {txns.map((row) => (
                   <tr key={row.id} className="border-b border-outline-variant last:border-0 hover:bg-surface-container-low transition-colors">
-                    <td className="px-6 py-4 text-body-md text-on-surface-variant tabular-nums whitespace-nowrap">{fmtDate(row.date)}</td>
+                    <td className="px-6 py-4 text-body-md text-on-surface-variant tabular-nums whitespace-nowrap">{formatDate(row.date)}</td>
                     <td className="px-6 py-4 text-body-md font-medium text-on-surface">{row.symbol || '—'}</td>
                     <td className="px-6 py-4">
                       <span className="text-body-md text-on-surface-variant block max-w-[22rem] truncate" title={row.action}>{row.action}</span>

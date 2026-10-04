@@ -14,6 +14,7 @@ import {
 } from '../api/holdings'
 import { createTaxLot, getTaxLots, updateTaxLot } from '../api/taxLots'
 import { getAllocation, type AllocationSlice } from '../api/holdings'
+import { formatDate } from '../lib/datetime'
 import { createTransaction, deleteTransaction, getTransactions, updateTransaction, type Transaction as ApiTransaction } from '../api/transactions'
 import {
   createDistribution,
@@ -56,8 +57,6 @@ const fmtNumber = (n: number) =>
 
 // Tax-lot dates are stored as a date at UTC midnight; format in UTC so they
 // don't slip to the previous day in western timezones.
-const fmtDate = (iso: string) =>
-  new Date(iso).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: '2-digit', timeZone: 'UTC' })
 
 function fmtSignedCurrency(n: number) {
   const v = n ?? 0
@@ -386,7 +385,7 @@ function SubPanel({ holding, activeTab, onTabChange, onAddLot, onEditLot, onAddT
                     : gainColor(unrealized > 0 ? 'positive' : unrealized < 0 ? 'negative' : 'neutral')
                   return (
                     <tr key={lot.id} className={`text-data-tabular text-on-surface tabular-nums ${closed ? 'opacity-50' : ''}`}>
-                      <td className="px-4 py-3">{fmtDate(lot.purchase_date)}</td>
+                      <td className="px-4 py-3">{formatDate(lot.purchase_date)}</td>
                       <td className="px-4 py-3 text-right">{fmtNumber(lot.purchase_quantity)}</td>
                       <td className="px-4 py-3 text-right">
                         {fmtNumber(lot.remaining_quantity)}
@@ -448,7 +447,7 @@ function SubPanel({ holding, activeTab, onTabChange, onAddLot, onEditLot, onAddT
                 )}
                 {!txnsLoading && txns.map((txn) => (
                   <tr key={txn.id} className="text-data-tabular text-on-surface tabular-nums">
-                    <td className="px-4 py-3">{fmtDate(txn.date)}</td>
+                    <td className="px-4 py-3">{formatDate(txn.date)}</td>
                     <td className="px-4 py-3">
                       <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-surface-container-high text-on-surface-variant text-[10px] font-bold">
                         {txn.action}
@@ -494,7 +493,7 @@ function SubPanel({ holding, activeTab, onTabChange, onAddLot, onEditLot, onAddT
                 )}
                 {!distsLoading && dists.map((dist) => (
                   <tr key={dist.id} className="text-data-tabular text-on-surface tabular-nums">
-                    <td className="px-4 py-3">{fmtDate(dist.payment_date)}</td>
+                    <td className="px-4 py-3">{formatDate(dist.payment_date)}</td>
                     <td className="px-4 py-3">
                       <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-surface-container-high text-on-surface-variant text-[10px] font-bold capitalize">
                         {dist.category}

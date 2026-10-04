@@ -7,19 +7,9 @@ import {
   type PriceRefreshResult,
   type QuotedSymbol,
 } from '../api/admin'
+import { formatDateTime } from '../lib/datetime'
 
 const fmtCurrency = (n: number) => (n ?? 0).toLocaleString('en-US', { style: 'currency', currency: 'USD' })
-
-// Unlike the date-only columns elsewhere, a price stamp is a real instant, so
-// it's shown in local time - the whole point is how long ago it was.
-const fmtDateTime = (iso: string) =>
-  new Date(iso).toLocaleString('en-US', {
-    month: 'short',
-    day: '2-digit',
-    year: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-  })
 
 // A count worth reporting back from a utility run.
 interface Stat {
@@ -136,7 +126,7 @@ function QuoteLog({ result }: { result: PriceRefreshResult }) {
     <>
       <div className="flex items-baseline justify-between mb-4">
         <h3 className="text-body-md font-semibold text-on-surface">Quotes</h3>
-        <p className="text-label-sm text-on-surface-variant">Run at {fmtDateTime(result.fetched_at)}</p>
+        <p className="text-label-sm text-on-surface-variant">Run at {formatDateTime(result.fetched_at)}</p>
       </div>
       <div className="overflow-x-auto -mx-6">
         <table className="w-full">
@@ -163,7 +153,7 @@ function QuoteLog({ result }: { result: PriceRefreshResult }) {
                 </td>
                 <td className="px-6 py-3 text-right text-data-tabular font-semibold tabular-nums">{priceChange(row)}</td>
                 <td className="px-6 py-3 text-right text-body-md text-on-surface-variant whitespace-nowrap">
-                  {row.as_of ? fmtDateTime(row.as_of) : '—'}
+                  {row.as_of ? formatDateTime(row.as_of) : '—'}
                 </td>
               </tr>
             ))}
