@@ -497,7 +497,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/marketdata.BackfillResult"
+                            "$ref": "#/definitions/github_com_eriksalino_wealthogic_api_internal_marketdata.BackfillResult"
                         }
                     },
                     "500": {
@@ -539,6 +539,43 @@ const docTemplate = `{
                     },
                     "500": {
                         "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/holdings/refresh-prices": {
+            "post": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "holdings"
+                ],
+                "summary": "Re-quote every open stock holding's last price",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/PriceRefreshResult"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -1951,6 +1988,10 @@ const docTemplate = `{
                 "last_price": {
                     "type": "number"
                 },
+                "last_price_updated_at": {
+                    "description": "LastPriceUpdatedAt is what the price is as of - the moment the exchange\nlast traded at it, or when we fetched it if the provider didn't say. Nil\nfor a price that came in with an imported positions file, which carries\nno time of its own beyond the file's own date.",
+                    "type": "string"
+                },
                 "logo_url": {
                     "type": "string"
                 },
@@ -2189,7 +2230,7 @@ const docTemplate = `{
                 "data": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/Upload"
+                        "$ref": "#/definitions/UploadRecord"
                     }
                 },
                 "page": {
@@ -2200,6 +2241,33 @@ const docTemplate = `{
                 },
                 "total": {
                     "type": "integer"
+                }
+            }
+        },
+        "PriceRefreshResult": {
+            "type": "object",
+            "properties": {
+                "considered": {
+                    "type": "integer"
+                },
+                "failed": {
+                    "type": "integer"
+                },
+                "fetched_at": {
+                    "description": "FetchedAt is when the pass ran, which is not what any one price is as of -\neach holding carries its own last_price_updated_at.",
+                    "type": "string"
+                },
+                "not_found": {
+                    "type": "integer"
+                },
+                "priced": {
+                    "type": "integer"
+                },
+                "symbols": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_eriksalino_wealthogic_api_internal_marketdata.QuotedSymbol"
+                    }
                 }
             }
         },
@@ -2760,10 +2828,13 @@ const docTemplate = `{
                 }
             }
         },
-        "Upload": {
+        "UploadRecord": {
             "type": "object",
             "properties": {
                 "account_id": {
+                    "type": "string"
+                },
+                "account_name": {
                     "type": "string"
                 },
                 "created_at": {
@@ -2773,13 +2844,18 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "file_name": {
+                    "description": "FileName is the bare name of the file, with any directory part stripped:\nhistory reads better as \"Positions.csv\" than as the path a client\nhappened to send.",
+                    "type": "string"
+                },
+                "file_type": {
+                    "description": "FileType is the kind of data the file carried - holdings or transactions -\nwhich is what distinguishes two imports of the same account on the same\nday from each other. Empty on rows imported before it was recorded.",
                     "type": "string"
                 },
                 "id": {
                     "type": "string"
                 },
                 "start_date": {
-                    "description": "StartDate and EndDate bound the dates of the transactions in the file, so\nwe know the range covered. Nil until the file is parsed.",
+                    "description": "StartDate and EndDate bound the dates of the transactions in the file, so\nwe know the range covered. Both are nil for a positions snapshot, which\ndescribes one moment rather than a span.",
                     "type": "string"
                 },
                 "updated_at": {
@@ -2885,7 +2961,7 @@ const docTemplate = `{
                 }
             }
         },
-        "marketdata.BackfillResult": {
+        "github_com_eriksalino_wealthogic_api_internal_marketdata.BackfillResult": {
             "type": "object",
             "properties": {
                 "considered": {
@@ -2899,6 +2975,29 @@ const docTemplate = `{
                 },
                 "not_found": {
                     "type": "integer"
+                }
+            }
+        },
+        "github_com_eriksalino_wealthogic_api_internal_marketdata.QuotedSymbol": {
+            "type": "object",
+            "properties": {
+                "as_of": {
+                    "type": "string"
+                },
+                "outcome": {
+                    "description": "Outcome is \"priced\", \"not_found\", or \"failed\".",
+                    "type": "string"
+                },
+                "previous_price": {
+                    "description": "Previous is the price this replaced, so an obviously wrong quote is\nvisible as a jump rather than having to be inferred.",
+                    "type": "number"
+                },
+                "price": {
+                    "description": "Price and AsOf are set only for a symbol that was priced.",
+                    "type": "number"
+                },
+                "symbol": {
+                    "type": "string"
                 }
             }
         }

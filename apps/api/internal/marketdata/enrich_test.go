@@ -13,6 +13,7 @@ import (
 // can assert on calls that should never have been made.
 type fakeProvider struct {
 	profiles map[string]Profile
+	quotes   map[string]Quote
 	err      error
 	asked    []string
 }
@@ -24,6 +25,15 @@ func (f *fakeProvider) FetchProfile(_ context.Context, symbol string) (Profile, 
 	}
 	p, ok := f.profiles[symbol]
 	return p, ok, nil
+}
+
+func (f *fakeProvider) FetchQuote(_ context.Context, symbol string) (Quote, bool, error) {
+	f.asked = append(f.asked, symbol)
+	if f.err != nil {
+		return Quote{}, false, f.err
+	}
+	q, ok := f.quotes[symbol]
+	return q, ok, nil
 }
 
 // Every provider call is rate-limited, so the ones that cannot possibly return

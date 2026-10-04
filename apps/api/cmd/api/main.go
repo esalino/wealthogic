@@ -31,16 +31,19 @@ func main() {
 		log.Fatalf("failed to connect to database: %v", err)
 	}
 
-	// Reference data (sector, industry) comes from a market-data provider. With
-	// no key configured the enricher is nil and every call through it is a
-	// no-op, so the app runs unchanged without one.
-	enricher := marketdata.NewEnricher(marketdata.NewFMPClient(os.Getenv("FMP_API_KEY")))
+	// Reference data (sector, industry) and quoted prices come from a market-data
+	// provider. With no key configured the provider is nil, which makes both the
+	// enricher and the pricer nil, and every call through them a no-op - so the
+	// app runs unchanged without one.
+	provider := marketdata.NewFMPClient(os.Getenv("FMP_API_KEY"))
+	enricher := marketdata.NewEnricher(provider)
+	pricer := marketdata.NewPricer(provider)
 	if !enricher.Enabled() {
-		log.Println("market data: FMP_API_KEY not set, holding profiles will not be fetched")
+		log.Println("market data: FMP_API_KEY not set, holding profiles and prices will not be fetched")
 	}
 
 	accountHandler := handlers.NewAccountHandler(database)
-	holdingHandler := handlers.NewHoldingHandler(database, enricher)
+	holdingHandler := handlers.NewHoldingHandler(database, enricher, pricer)
 	taxLotHandler := handlers.NewTaxLotHandler(database)
 	transactionHandler := handlers.NewTransactionHandler(database)
 	distributionHandler := handlers.NewDistributionHandler(database)
@@ -73,6 +76,7 @@ func main() {
 	r.PATCH("/holdings/:id", holdingHandler.UpdateHolding)
 	r.GET("/holdings/allocation", holdingHandler.GetAllocation)
 	r.POST("/holdings/backfill-profiles", holdingHandler.BackfillProfiles)
+	r.POST("/holdings/refresh-prices", holdingHandler.RefreshPrices)
 	r.POST("/holdings/recalculate", holdingHandler.Recalculate)
 	r.GET("/tax-lots", taxLotHandler.GetTaxLots)
 	r.POST("/tax-lots", taxLotHandler.CreateTaxLot)

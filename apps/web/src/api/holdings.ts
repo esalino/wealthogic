@@ -48,6 +48,9 @@ export interface Holding {
   profile_fetched_at: string | null
   status: string
   last_price: number
+  // What the last price is as of. Null for a price that came in with an
+  // imported positions file, which carries no time of its own.
+  last_price_updated_at: string | null
   purchase_quantity: number
   current_value: number
   average_cost_basis: number

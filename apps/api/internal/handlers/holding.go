@@ -20,6 +20,7 @@ type HoldingHandler interface {
 	CreateHolding(c *gin.Context)
 	UpdateHolding(c *gin.Context)
 	BackfillProfiles(c *gin.Context)
+	RefreshPrices(c *gin.Context)
 	Recalculate(c *gin.Context)
 	GetAllocation(c *gin.Context)
 }
@@ -27,10 +28,11 @@ type HoldingHandler interface {
 type holdingHandler struct {
 	db       *gorm.DB
 	enricher *marketdata.Enricher
+	pricer   *marketdata.Pricer
 }
 
-func NewHoldingHandler(db *gorm.DB, enricher *marketdata.Enricher) HoldingHandler {
-	return &holdingHandler{db: db, enricher: enricher}
+func NewHoldingHandler(db *gorm.DB, enricher *marketdata.Enricher, pricer *marketdata.Pricer) HoldingHandler {
+	return &holdingHandler{db: db, enricher: enricher, pricer: pricer}
 }
 
 type paginatedHoldings struct {
@@ -325,6 +327,35 @@ func (h *holdingHandler) BackfillProfiles(c *gin.Context) {
 	result, err := h.enricher.Backfill(c.Request.Context(), h.db, 250*time.Millisecond)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to backfill profiles"})
+		return
+	}
+	c.JSON(http.StatusOK, result)
+}
+
+// RefreshPrices godoc
+// @Summary      Re-quote every open stock holding's last price
+// @Tags         holdings
+// @Produce      json
+// @Success      200  {object}  marketdata.RefreshResult
+// @Failure      503  {object}  map[string]string
+// @Failure      500  {object}  map[string]string
+// @Router       /holdings/refresh-prices [post]
+//
+// Prices otherwise only move when a positions file is imported, so a book can
+// be weeks stale. This asks the provider for each open stock position and
+// stamps what the new price is as of. Requests are paced, so a large portfolio
+// takes a while.
+func (h *holdingHandler) RefreshPrices(c *gin.Context) {
+	if !h.pricer.Enabled() {
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"error": "market data is not configured; set FMP_API_KEY to enable price refreshes",
+		})
+		return
+	}
+
+	result, err := h.pricer.RefreshOpenPositions(c.Request.Context(), h.db, 250*time.Millisecond)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to refresh prices"})
 		return
 	}
 	c.JSON(http.StatusOK, result)

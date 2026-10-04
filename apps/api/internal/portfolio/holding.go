@@ -5,6 +5,7 @@ package portfolio
 import (
 	"math"
 	"strings"
+	"time"
 
 	"github.com/eriksalino/wealthogic/api/internal/models"
 	"github.com/eriksalino/wealthogic/api/internal/tax"
@@ -216,6 +217,36 @@ func DepleteLots(tx *gorm.DB, closing *models.Transaction, costBasisMethod strin
 	return realized, remaining, nil
 }
 
+// ApplyPrice puts a newly quoted price on a holding and recomputes what follows
+// from it: market value, and the unrealized gain against the basis already
+// recorded. asOf is what the price is as of; a zero time leaves the existing
+// stamp alone rather than claiming the price is current.
+//
+// The position itself is untouched. Quantity and cost basis come from the
+// ledger, and a reprice knows nothing about either - it must not overwrite the
+// figures of a holding whose transactions haven't been imported.
+func ApplyPrice(holding *models.Holding, price float64, asOf time.Time) {
+	holding.LastPrice = price
+	if !asOf.IsZero() {
+		at := asOf.UTC()
+		holding.LastPriceUpdatedAt = &at
+	}
+	reprice(holding)
+}
+
+// reprice recomputes the figures that fall out of a holding's price and the
+// position it already has. It is the one place that math lives, so a reprice
+// and a full recompute can't drift apart.
+func reprice(holding *models.Holding) {
+	holding.CurrentValue = holding.Quantity * holding.LastPrice * holding.Multiplier()
+	holding.GainUnrealizedAmount = holding.CurrentValue - holding.CostBasisTotal
+	if holding.CostBasisTotal > 0 {
+		holding.GainUnrealizedPercent = (holding.GainUnrealizedAmount / holding.CostBasisTotal) * 100
+	} else {
+		holding.GainUnrealizedPercent = 0
+	}
+}
+
 // RecalcHolding recomputes a holding's aggregates and saves them: position
 // (quantity, cost basis, current value, unrealized gain) from its open buy lots,
 // and realized gain from the Gain ledger. Dividend income isn't derived here yet.
@@ -255,13 +286,7 @@ func RecalcHolding(tx *gorm.DB, holding *models.Holding) error {
 		holding.AverageCostBasis = 0
 	}
 
-	holding.CurrentValue = quantity * holding.LastPrice * multiplier
-	holding.GainUnrealizedAmount = holding.CurrentValue - costBasisTotal
-	if costBasisTotal > 0 {
-		holding.GainUnrealizedPercent = (holding.GainUnrealizedAmount / costBasisTotal) * 100
-	} else {
-		holding.GainUnrealizedPercent = 0
-	}
+	reprice(holding)
 
 	// Realized amounts come from this holding's disposals. Income is excluded:
 	// a dividend has no cost basis, so folding it in would make the realized

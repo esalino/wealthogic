@@ -105,6 +105,12 @@ type Holding struct {
 
 	LastPrice float64 `json:"last_price"`
 
+	// LastPriceUpdatedAt is what the price is as of - the moment the exchange
+	// last traded at it, or when we fetched it if the provider didn't say. Nil
+	// for a price that came in with an imported positions file, which carries
+	// no time of its own beyond the file's own date.
+	LastPriceUpdatedAt *time.Time `json:"last_price_updated_at"`
+
 	Quantity     float64 `gorm:"not null;default:0"  json:"purchase_quantity"`
 	CurrentValue float64 `json:"current_value"`
 
@@ -176,6 +182,26 @@ func (h Holding) WantsProfile() bool {
 		return false
 	}
 	if h.AssetType == AssetTypeOption || h.AssetType == AssetTypeTreasury {
+		return false
+	}
+	if _, isOption := ParseOptionSymbol(h.Symbol); isOption {
+		return false
+	}
+	return true
+}
+
+// WantsQuote reports whether it's worth asking a market-data provider for this
+// holding's price.
+//
+// Only an open position needs one: a closed holding's figures are history, and
+// repricing it would move a market value that is settled at zero. Options are
+// quoted per contract symbol rather than per ticker, so they're left to the
+// price that came in with the trade.
+func (h Holding) WantsQuote() bool {
+	if h.Symbol == "" || h.Status != HoldingStatusOpen {
+		return false
+	}
+	if h.AssetType != AssetTypeStock {
 		return false
 	}
 	if _, isOption := ParseOptionSymbol(h.Symbol); isOption {
