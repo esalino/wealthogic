@@ -48,3 +48,34 @@ export function todayLocal(): string {
   const pad = (n: number) => String(n).padStart(2, '0')
   return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`
 }
+
+// Units from largest to smallest, with the seconds in each. Used to pick the
+// coarsest unit that still reads as a number greater than one.
+const RELATIVE_UNITS: [Intl.RelativeTimeFormatUnit, number][] = [
+  ['year', 31536000],
+  ['month', 2592000],
+  ['week', 604800],
+  ['day', 86400],
+  ['hour', 3600],
+  ['minute', 60],
+]
+
+// formatRelative renders how long ago an instant was - "2 hours ago", "just
+// now". For `timestamptz` columns, like formatDateTime.
+//
+// Pair it with the absolute time in a title attribute: relative reads faster
+// ("did I run this today?") but only the absolute one is precise.
+export function formatRelative(iso: string): string {
+  const seconds = (Date.now() - new Date(iso).getTime()) / 1000
+  // A clock skew between browser and server can put a just-written timestamp a
+  // second or two in the future; "in 2 seconds" would be nonsense.
+  if (seconds < 60) return 'just now'
+
+  const rtf = new Intl.RelativeTimeFormat('en-US', { numeric: 'auto' })
+  for (const [unit, unitSeconds] of RELATIVE_UNITS) {
+    if (seconds >= unitSeconds) {
+      return rtf.format(-Math.floor(seconds / unitSeconds), unit)
+    }
+  }
+  return 'just now'
+}

@@ -27,6 +27,36 @@ definitions:
       updated_at:
         type: string
     type: object
+  AdminLog:
+    properties:
+      created_at:
+        type: string
+      duration_ms:
+        description: |-
+          DurationMS is how long the run took, stored so reading "took 4s" needs no
+          arithmetic over the two timestamps.
+        type: integer
+      errors:
+        description: |-
+          Errors is what went wrong, one per line, or nil for a clean run.
+
+          It is independent of the run having completed: a sweep can finish having
+          failed on some of its items - a symbol the quote provider won't price -
+          and that is a successful run with errors in it, not a failure.
+        type: string
+      finished_at:
+        type: string
+      id:
+        type: string
+      started_at:
+        type: string
+      utility:
+        description: |-
+          Utility names the tool that ran - see the Utility* constants in
+          internal/adminlog. Indexed with StartedAt so "the latest run of each
+          utility" is an index scan.
+        type: string
+    type: object
   AllocationSlice:
     properties:
       label:
@@ -514,6 +544,12 @@ definitions:
         type: integer
       priced:
         type: integer
+      provider:
+        description: |-
+          Provider names the vendor that answered. Worth reporting now that it's
+          swappable: free tiers differ in coverage, so which one priced the book
+          explains a symbol that came back unpriced.
+        type: string
       symbols:
         items:
           $ref: '#/definitions/github_com_eriksalino_wealthogic_api_internal_marketdata.QuotedSymbol'
@@ -1073,6 +1109,13 @@ definitions:
         type: integer
       enriched:
         type: integer
+      errors:
+        description: |-
+          Errors is one message per holding whose lookup failed, so a caller can
+          record why rather than only how many.
+        items:
+          type: string
+        type: array
       failed:
         type: integer
       not_found:
@@ -1081,6 +1124,12 @@ definitions:
   github_com_eriksalino_wealthogic_api_internal_marketdata.QuotedSymbol:
     properties:
       as_of:
+        type: string
+      error:
+        description: |-
+          Error is why a failed lookup failed, empty otherwise. Worth carrying: a
+          bare "failed" says nothing about whether to retry, widen a plan, or swap
+          providers, and a 402 says all three.
         type: string
       outcome:
         description: Outcome is "priced", "not_found", or "failed".
@@ -1162,6 +1211,26 @@ paths:
       summary: Create a new account
       tags:
       - accounts
+  /admin/logs/latest:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/AdminLog'
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: The most recent run of each maintenance utility
+      tags:
+      - admin
   /distributions:
     get:
       parameters:

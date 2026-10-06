@@ -15,12 +15,16 @@ import (
 // Like the Enricher, every method is safe to call on a nil Pricer, which is
 // what a build with no API key configured produces.
 type Pricer struct {
-	provider Provider
+	provider QuoteProvider
 }
 
-// NewPricer wraps a provider. A nil provider yields a nil Pricer, so "no key
-// configured" and "no pricer" are the same thing to callers.
-func NewPricer(provider Provider) *Pricer {
+// NewPricer wraps a quote provider. A nil provider yields a nil Pricer, so "no
+// key configured" and "no pricer" are the same thing to callers.
+//
+// Any QuoteProvider will do, which is the point: which vendor prices the book is
+// a startup decision (see NewQuoteProvider), and nothing below here knows or
+// cares which one answered.
+func NewPricer(provider QuoteProvider) *Pricer {
 	if provider == nil {
 		return nil
 	}
@@ -29,6 +33,14 @@ func NewPricer(provider Provider) *Pricer {
 
 // Enabled reports whether repricing will actually do anything.
 func (p *Pricer) Enabled() bool { return p != nil && p.provider != nil }
+
+// ProviderName is the vendor doing the pricing, or "" when none is configured.
+func (p *Pricer) ProviderName() string {
+	if !p.Enabled() {
+		return ""
+	}
+	return p.provider.Name()
+}
 
 // quoteOutcome is what a refresh managed for one holding.
 type quoteOutcome string
@@ -51,6 +63,10 @@ type QuotedSymbol struct {
 	// Previous is the price this replaced, so an obviously wrong quote is
 	// visible as a jump rather than having to be inferred.
 	Previous float64 `json:"previous_price"`
+	// Error is why a failed lookup failed, empty otherwise. Worth carrying: a
+	// bare "failed" says nothing about whether to retry, widen a plan, or swap
+	// providers, and a 402 says all three.
+	Error string `json:"error,omitempty"`
 }
 
 // RefreshResult reports what a refresh pass did.
@@ -61,9 +77,25 @@ type RefreshResult struct {
 	Failed     int `json:"failed"`
 	// FetchedAt is when the pass ran, which is not what any one price is as of -
 	// each holding carries its own last_price_updated_at.
-	FetchedAt time.Time      `json:"fetched_at"`
-	Symbols   []QuotedSymbol `json:"symbols"`
+	FetchedAt time.Time `json:"fetched_at"`
+	// Provider names the vendor that answered. Worth reporting now that it's
+	// swappable: free tiers differ in coverage, so which one priced the book
+	// explains a symbol that came back unpriced.
+	Provider string         `json:"provider"`
+	Symbols  []QuotedSymbol `json:"symbols"`
 } // @name PriceRefreshResult
+
+// Errors is one message per symbol the pass could not price, for the admin log.
+// Empty for a clean run, including one that simply found nothing to do.
+func (r RefreshResult) Errors() []string {
+	var errs []string
+	for _, s := range r.Symbols {
+		if s.Error != "" {
+			errs = append(errs, s.Error)
+		}
+	}
+	return errs
+}
 
 // RefreshHolding quotes one holding and saves the new price along with the
 // figures that follow from it. It reports whether a price was actually written.
@@ -113,6 +145,7 @@ func (p *Pricer) RefreshOpenPositions(ctx context.Context, db *gorm.DB, pause ti
 	if !p.Enabled() {
 		return result, nil
 	}
+	result.Provider = p.provider.Name()
 
 	// Narrowed in SQL as well as by WantsQuote, so a large book of closed
 	// positions and options isn't loaded just to be skipped.
@@ -141,8 +174,9 @@ func (p *Pricer) RefreshOpenPositions(ctx context.Context, db *gorm.DB, pause ti
 		priced, err := p.RefreshHolding(ctx, db, h)
 		switch {
 		case err != nil:
-			log.Printf("market data: quote for %s failed: %v", h.Symbol, err)
+			log.Printf("market data: %v", err)
 			line.Outcome = string(quoteFailed)
+			line.Error = err.Error()
 			result.Failed++
 		case priced:
 			line.Outcome = string(quotePriced)

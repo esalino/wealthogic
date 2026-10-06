@@ -31,15 +31,28 @@ func main() {
 		log.Fatalf("failed to connect to database: %v", err)
 	}
 
-	// Reference data (sector, industry) and quoted prices come from a market-data
-	// provider. With no key configured the provider is nil, which makes both the
-	// enricher and the pricer nil, and every call through them a no-op - so the
-	// app runs unchanged without one.
-	provider := marketdata.NewFMPClient(os.Getenv("FMP_API_KEY"))
-	enricher := marketdata.NewEnricher(provider)
-	pricer := marketdata.NewPricer(provider)
+	// Reference data (sector, industry) always comes from FMP - it's the vendor
+	// that describes companies. With no key the provider is nil, which makes the
+	// enricher nil and every call through it a no-op, so the app runs unchanged
+	// without one.
+	enricher := marketdata.NewEnricher(marketdata.NewFMPClient(os.Getenv("FMP_API_KEY")))
 	if !enricher.Enabled() {
-		log.Println("market data: FMP_API_KEY not set, holding profiles and prices will not be fetched")
+		log.Println("market data: FMP_API_KEY not set, holding profiles will not be fetched")
+	}
+
+	// Quotes are a separate choice, because the free tiers differ in what they
+	// cover: FMP answers 402 Payment Required for symbols off the major
+	// exchanges, which marketdata.app prices fine. QUOTE_PROVIDER picks one by
+	// name; left empty it uses whichever has a key.
+	pricer := marketdata.NewPricer(marketdata.NewQuoteProvider(marketdata.QuoteConfig{
+		Provider:         os.Getenv("QUOTE_PROVIDER"),
+		FMPAPIKey:        os.Getenv("FMP_API_KEY"),
+		MarketDataAPIKey: os.Getenv("MARKETDATA_API_KEY"),
+	}))
+	if pricer.Enabled() {
+		log.Printf("market data: quotes from %s", pricer.ProviderName())
+	} else {
+		log.Println("market data: no quote provider configured, prices will not be refreshed")
 	}
 
 	accountHandler := handlers.NewAccountHandler(database)
@@ -50,6 +63,7 @@ func main() {
 	userHandler := handlers.NewUserHandler(database)
 	uploadHandler := handlers.NewUploadHandler(database, enricher)
 	taxHandler := handlers.NewTaxHandler(database)
+	adminHandler := handlers.NewAdminHandler(database)
 
 	r := gin.Default()
 
@@ -101,6 +115,8 @@ func main() {
 	r.GET("/tax/profiles", taxHandler.GetProfiles)
 	r.PUT("/tax/profiles", taxHandler.PutProfile)
 	r.POST("/tax/recompute", taxHandler.Recompute)
+
+	r.GET("/admin/logs/latest", adminHandler.GetLatestLogs)
 
 	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
 

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/eriksalino/wealthogic/api/internal/adminlog"
 	"github.com/eriksalino/wealthogic/api/internal/marketdata"
 	"github.com/eriksalino/wealthogic/api/internal/models"
 	"github.com/eriksalino/wealthogic/api/internal/portfolio"
@@ -324,11 +325,16 @@ func (h *holdingHandler) BackfillProfiles(c *gin.Context) {
 		return
 	}
 
+	run := adminlog.Start(adminlog.UtilityBackfillProfiles)
+
 	result, err := h.enricher.Backfill(c.Request.Context(), h.db, 250*time.Millisecond)
 	if err != nil {
+		run.Finish(h.db, append(result.Errors, err.Error()))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to backfill profiles"})
 		return
 	}
+	run.Finish(h.db, result.Errors)
+
 	c.JSON(http.StatusOK, result)
 }
 
@@ -353,11 +359,18 @@ func (h *holdingHandler) RefreshPrices(c *gin.Context) {
 		return
 	}
 
+	run := adminlog.Start(adminlog.UtilityRefreshPrices)
+
 	result, err := h.pricer.RefreshOpenPositions(c.Request.Context(), h.db, 250*time.Millisecond)
 	if err != nil {
+		// A pass that died partway still ran, and why it died is the most
+		// useful thing the log can hold - so it's recorded before returning.
+		run.Finish(h.db, append(result.Errors(), err.Error()))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to refresh prices"})
 		return
 	}
+	run.Finish(h.db, result.Errors())
+
 	c.JSON(http.StatusOK, result)
 }
 
@@ -381,8 +394,11 @@ type recalculateResult struct {
 // to zero before status was derived still reads Open. This replays the
 // derivation over the whole book.
 func (h *holdingHandler) Recalculate(c *gin.Context) {
+	run := adminlog.Start(adminlog.UtilityRecalculateHoldings)
+
 	var holdings []models.Holding
 	if err := h.db.Find(&holdings).Error; err != nil {
+		run.Finish(h.db, []string{err.Error()})
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch holdings"})
 		return
 	}
@@ -394,6 +410,7 @@ func (h *holdingHandler) Recalculate(c *gin.Context) {
 		if err := h.db.Transaction(func(tx *gorm.DB) error {
 			return portfolio.RecalcHolding(tx, &holdings[i])
 		}); err != nil {
+			run.Finish(h.db, []string{fmt.Sprintf("%s: %v", holdings[i].Symbol, err)})
 			c.JSON(http.StatusInternalServerError, gin.H{
 				"error": fmt.Sprintf("failed to recompute holding %s", holdings[i].Symbol),
 			})
@@ -405,6 +422,7 @@ func (h *holdingHandler) Recalculate(c *gin.Context) {
 		}
 		result.Open++
 	}
+	run.Finish(h.db, nil)
 
 	c.JSON(http.StatusOK, result)
 }

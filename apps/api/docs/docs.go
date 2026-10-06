@@ -106,6 +106,37 @@ const docTemplate = `{
                 }
             }
         },
+        "/admin/logs/latest": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "The most recent run of each maintenance utility",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/AdminLog"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/distributions": {
             "get": {
                 "produces": [
@@ -1603,6 +1634,35 @@ const docTemplate = `{
                 }
             }
         },
+        "AdminLog": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "duration_ms": {
+                    "description": "DurationMS is how long the run took, stored so reading \"took 4s\" needs no\narithmetic over the two timestamps.",
+                    "type": "integer"
+                },
+                "errors": {
+                    "description": "Errors is what went wrong, one per line, or nil for a clean run.\n\nIt is independent of the run having completed: a sweep can finish having\nfailed on some of its items - a symbol the quote provider won't price -\nand that is a successful run with errors in it, not a failure.",
+                    "type": "string"
+                },
+                "finished_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "started_at": {
+                    "type": "string"
+                },
+                "utility": {
+                    "description": "Utility names the tool that ran - see the Utility* constants in\ninternal/adminlog. Indexed with StartedAt so \"the latest run of each\nutility\" is an index scan.",
+                    "type": "string"
+                }
+            }
+        },
         "AllocationSlice": {
             "type": "object",
             "properties": {
@@ -2262,6 +2322,10 @@ const docTemplate = `{
                 },
                 "priced": {
                     "type": "integer"
+                },
+                "provider": {
+                    "description": "Provider names the vendor that answered. Worth reporting now that it's\nswappable: free tiers differ in coverage, so which one priced the book\nexplains a symbol that came back unpriced.",
+                    "type": "string"
                 },
                 "symbols": {
                     "type": "array",
@@ -2974,6 +3038,13 @@ const docTemplate = `{
                 "enriched": {
                     "type": "integer"
                 },
+                "errors": {
+                    "description": "Errors is one message per holding whose lookup failed, so a caller can\nrecord why rather than only how many.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
                 "failed": {
                     "type": "integer"
                 },
@@ -2986,6 +3057,10 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "as_of": {
+                    "type": "string"
+                },
+                "error": {
+                    "description": "Error is why a failed lookup failed, empty otherwise. Worth carrying: a\nbare \"failed\" says nothing about whether to retry, widen a plan, or swap\nproviders, and a 402 says all three.",
                     "type": "string"
                 },
                 "outcome": {

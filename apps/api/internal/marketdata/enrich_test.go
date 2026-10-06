@@ -18,6 +18,8 @@ type fakeProvider struct {
 	asked    []string
 }
 
+func (f *fakeProvider) Name() string { return "fake" }
+
 func (f *fakeProvider) FetchProfile(_ context.Context, symbol string) (Profile, bool, error) {
 	f.asked = append(f.asked, symbol)
 	if f.err != nil {

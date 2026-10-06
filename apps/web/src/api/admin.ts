@@ -34,6 +34,10 @@ export interface PriceRefreshResult {
   not_found: number
   failed: number
   fetched_at: string
+  // Which vendor answered. Quote providers are swappable and their free tiers
+  // differ in coverage, so this is what explains a symbol that came back
+  // unpriced.
+  provider: string
   symbols: QuotedSymbol[]
 }
 
@@ -65,4 +69,38 @@ export interface RecalculateResult {
 // before the derivation changed.
 export function recalculateHoldings(): Promise<RecalculateResult> {
   return post<RecalculateResult>('/holdings/recalculate', 'Failed to recalculate holdings')
+}
+
+// One recorded run of a maintenance utility. The Admin page reads these to show
+// when each tool was last run, which the data a run touches can't tell you - a
+// price stamp says when a holding was priced, not whether the sweep ran at all
+// and found nothing to do.
+export interface AdminLog {
+  id: string
+  // Which tool ran; see UTILITY_* below.
+  utility: string
+  started_at: string
+  finished_at: string
+  duration_ms: number
+  // What went wrong, one per line, or null for a clean run. Independent of the
+  // run completing: a sweep can finish having failed on some of its items.
+  errors: string | null
+  created_at: string
+}
+
+// Utility names as the API records them. They key each card's last-run line.
+export const UTILITY_REFRESH_PRICES = 'refresh_holding_prices'
+export const UTILITY_BACKFILL_PROFILES = 'backfill_holding_profiles'
+export const UTILITY_RECALCULATE = 'recalculate_holdings'
+
+// The most recent run of each utility. A tool that has never run is absent.
+export async function getLatestAdminLogs(): Promise<AdminLog[]> {
+  const res = await fetch(`${API_BASE}/admin/logs/latest`)
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.error ?? 'Failed to fetch admin logs')
+  }
+
+  return res.json()
 }

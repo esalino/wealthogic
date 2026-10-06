@@ -2,6 +2,7 @@ package marketdata
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"time"
 
@@ -15,12 +16,16 @@ import (
 // no API key configured produces - enrichment then does nothing and the caller
 // needs no special case.
 type Enricher struct {
-	provider Provider
+	provider ProfileProvider
 }
 
-// NewEnricher wraps a provider. A nil provider yields a nil Enricher, so
-// "no key configured" and "no enricher" are the same thing to callers.
-func NewEnricher(provider Provider) *Enricher {
+// NewEnricher wraps a profile provider. A nil provider yields a nil Enricher,
+// so "no key configured" and "no enricher" are the same thing to callers.
+//
+// It takes the narrow interface deliberately: enrichment needs only profiles,
+// and saying so keeps a vendor that quotes prices but knows nothing about
+// companies from being handed to it by mistake.
+func NewEnricher(provider ProfileProvider) *Enricher {
 	if provider == nil {
 		return nil
 	}
@@ -89,6 +94,9 @@ type BackfillResult struct {
 	Enriched   int `json:"enriched"`
 	NotFound   int `json:"not_found"`
 	Failed     int `json:"failed"`
+	// Errors is one message per holding whose lookup failed, so a caller can
+	// record why rather than only how many.
+	Errors []string `json:"errors,omitempty"`
 }
 
 // Backfill looks up every holding that still wants a profile.
@@ -126,6 +134,7 @@ func (e *Enricher) Backfill(ctx context.Context, db *gorm.DB, pause time.Duratio
 		if err := e.Enrich(ctx, db, h); err != nil {
 			log.Printf("market data: backfill for %s failed: %v", h.Symbol, err)
 			result.Failed++
+			result.Errors = append(result.Errors, fmt.Sprintf("%s: %v", h.Symbol, err))
 			continue
 		}
 		if h.Sector != before || h.CompanyName != "" {
