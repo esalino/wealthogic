@@ -1734,6 +1734,11 @@ paths:
         in: query
         name: holding_id
         type: string
+      - description: show to include activity deferred in every jurisdiction (e.g.
+          a retirement account); hidden by default
+        in: query
+        name: deferred
+        type: string
       - description: Page number (default 1)
         in: query
         name: page
@@ -1888,6 +1893,11 @@ paths:
         in: query
         name: year
         type: integer
+      - description: show to include activity deferred in every jurisdiction (e.g.
+          a retirement account); hidden by default
+        in: query
+        name: deferred
+        type: string
       produces:
       - application/json
       responses:

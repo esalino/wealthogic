@@ -63,6 +63,48 @@ var characterOrder = map[string]int{
 	models.CharacterOrdinary:          3,
 }
 
+// showDeferred reads the Tax Center's deferred selector. Hidden unless asked
+// for: a year's tax picture is what that year owes, and the common case - a U.S.
+// retirement account, deferred federally and in every state - is pages of rows
+// that owe nothing. Asking for them is one query parameter.
+func showDeferred(c *gin.Context) bool {
+	return c.Query("deferred") == "show"
+}
+
+// hideDeferred drops the events that no jurisdiction taxes this year because of
+// the account they sit in, from a query over realized_events (or anything joined
+// to it as "e").
+//
+// The test is the treatments, not the account's tax type, because shelter is a
+// per-jurisdiction fact: a U.S. IRA is deferred everywhere the taxpayer is
+// subject to, so the whole event drops, but a jurisdiction that taxes a foreign
+// retirement account would leave one treatment standing on its own merits - and
+// an event one jurisdiction still taxes belongs in the ledger. Hence "every
+// treatment is sheltered" rather than "the account is sheltered".
+//
+// An event with no treatments at all stays visible: nothing has judged it yet,
+// which is worth seeing rather than hiding.
+func hideDeferred(q *gorm.DB, eventsTable string) *gorm.DB {
+	treatments := "SELECT 1 FROM tax_treatments tt WHERE tt.realized_event_id = " + eventsTable + ".id"
+	return q.Where(
+		"EXISTS ("+treatments+" AND tt.reason <> ?) OR NOT EXISTS ("+treatments+")",
+		models.ReasonShelteredAccount,
+	)
+}
+
+// treatmentsFor is the base query behind both of GetSummary's rollups: every
+// treatment, joined to the event it describes, with the deferred selector
+// already applied. Shared so the taxable and excluded halves of a card can't
+// disagree about which events they cover.
+func (h *taxHandler) treatmentsFor(c *gin.Context) *gorm.DB {
+	q := h.db.Table("tax_treatments AS t").
+		Joins("JOIN realized_events AS e ON e.id = t.realized_event_id")
+	if !showDeferred(c) {
+		q = hideDeferred(q, "e")
+	}
+	return q
+}
+
 func label(m map[string]string, key, fallback string) string {
 	if v, ok := m[key]; ok {
 		return v
@@ -125,7 +167,8 @@ type taxSummary struct {
 // @Summary      Taxable income for a year, broken down per jurisdiction
 // @Tags         tax
 // @Produce      json
-// @Param        year  query     int  false  "Tax year (defaults to the current year)"
+// @Param        year      query     int     false  "Tax year (defaults to the current year)"
+// @Param        deferred  query     string  false  "show to include activity deferred in every jurisdiction (e.g. a retirement account); hidden by default"
 // @Success      200   {object}  taxSummary
 // @Failure      500   {object}  map[string]string
 // @Router       /tax/summary [get]
@@ -155,8 +198,8 @@ func (h *taxHandler) GetSummary(c *gin.Context) {
 		TaxCharacter     string
 		Amount           float64
 	}
-	if err := h.db.Table("tax_treatments AS t").
-		Joins("JOIN realized_events AS e ON e.id = t.realized_event_id").
+	taxable := h.treatmentsFor(c)
+	if err := taxable.
 		Select("t.jurisdiction_code, e.category, e.term, t.tax_character, COALESCE(SUM(t.taxable_amount), 0) AS amount").
 		Where("t.tax_year = ? AND t.taxable", year).
 		Group("t.jurisdiction_code, e.category, e.term, t.tax_character").
@@ -171,10 +214,11 @@ func (h *taxHandler) GetSummary(c *gin.Context) {
 		Reason           string
 		Amount           float64
 	}
-	if err := h.db.Model(&models.TaxTreatment{}).
-		Select("jurisdiction_code, reason, COALESCE(SUM(excluded_amount), 0) AS amount").
-		Where("tax_year = ? AND NOT taxable", year).
-		Group("jurisdiction_code, reason").
+	excluded := h.treatmentsFor(c)
+	if err := excluded.
+		Select("t.jurisdiction_code, t.reason, COALESCE(SUM(t.excluded_amount), 0) AS amount").
+		Where("t.tax_year = ? AND NOT t.taxable", year).
+		Group("t.jurisdiction_code, t.reason").
 		Scan(&exclusionRows).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to summarize tax treatments"})
 		return
@@ -471,6 +515,7 @@ type paginatedRealizedEvents struct {
 // @Param        symbol      query     string  false  "Filter to one security"
 // @Param        account_id  query     string  false  "Filter to one account"
 // @Param        holding_id  query     string  false  "Filter to one holding"
+// @Param        deferred    query     string  false  "show to include activity deferred in every jurisdiction (e.g. a retirement account); hidden by default"
 // @Param        page        query     int     false  "Page number (default 1)"
 // @Param        page_size   query     int     false  "Items per page (default 20, max 100)"
 // @Success      200         {object}  paginatedRealizedEvents
@@ -481,6 +526,10 @@ type paginatedRealizedEvents struct {
 // Capital gains, Treasury interest, and dividends all live in one ledger, so
 // filtering, sorting, and paging are a plain query over a single table rather
 // than a union of the two ledgers this used to read.
+//
+// Deferred activity is hidden unless deferred=show - see hideDeferred - and the
+// summary honours the same parameter, so the list, its totals, and the
+// jurisdiction cards always describe the same money.
 func (h *taxHandler) GetEvents(c *gin.Context) {
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
@@ -495,6 +544,9 @@ func (h *taxHandler) GetEvents(c *gin.Context) {
 	// count, the summary, and the page so all three agree.
 	var filterErr error
 	filter := func(q *gorm.DB) *gorm.DB {
+		if !showDeferred(c) {
+			q = hideDeferred(q, "realized_events")
+		}
 		if y := c.Query("year"); y != "" {
 			if year, err := strconv.Atoi(y); err == nil {
 				q = q.Where("EXTRACT(YEAR FROM event_date) = ?", year)

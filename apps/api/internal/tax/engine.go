@@ -75,15 +75,19 @@ func (s *RuleSet) For(jurisdiction string) []models.TaxRule {
 // isSheltered reports whether an account type defers or eliminates tax on the
 // activity inside it, and with what character. A sheltered account settles the
 // question everywhere at once, so it's checked before any jurisdiction rule.
+//
+// Which types shelter is models.ShelteredAccountTaxTypes, shared with the Tax
+// Center's query so the two can't disagree about what a retirement account is;
+// only the character is decided here.
 func isSheltered(accountTaxType string) (character string, sheltered bool) {
-	switch accountTaxType {
-	case models.AccountTaxTypeIRA:
-		// Taxed on withdrawal instead, not here.
-		return models.CharacterDeferred, true
-	case models.AccountTaxTypeRoth:
+	if !models.IsShelteredAccountTaxType(accountTaxType) {
+		return "", false
+	}
+	if accountTaxType == models.AccountTaxTypeRoth {
 		return models.CharacterExempt, true
 	}
-	return "", false
+	// Taxed on withdrawal instead, not here.
+	return models.CharacterDeferred, true
 }
 
 // Evaluate produces one treatment per jurisdiction the taxpayer is subject to.

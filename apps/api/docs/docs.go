@@ -906,6 +906,12 @@ const docTemplate = `{
                         "in": "query"
                     },
                     {
+                        "type": "string",
+                        "description": "show to include activity deferred in every jurisdiction (e.g. a retirement account); hidden by default",
+                        "name": "deferred",
+                        "in": "query"
+                    },
+                    {
                         "type": "integer",
                         "description": "Page number (default 1)",
                         "name": "page",
@@ -1141,6 +1147,12 @@ const docTemplate = `{
                         "type": "integer",
                         "description": "Tax year (defaults to the current year)",
                         "name": "year",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "show to include activity deferred in every jurisdiction (e.g. a retirement account); hidden by default",
+                        "name": "deferred",
                         "in": "query"
                     }
                 ],

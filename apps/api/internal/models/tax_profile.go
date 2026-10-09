@@ -16,6 +16,22 @@ const (
 	AccountTaxTypeRoth     = "Roth"
 )
 
+// ShelteredAccountTaxTypes are the tax types whose activity is never taxed in
+// the year it happens. A slice rather than a switch so the set is enumerable:
+// adding one shelters it everywhere at once.
+var ShelteredAccountTaxTypes = []string{AccountTaxTypeIRA, AccountTaxTypeRoth}
+
+// IsShelteredAccountTaxType reports whether an account's tax type shelters the
+// activity inside it from current-year tax, whatever the jurisdiction.
+func IsShelteredAccountTaxType(taxType string) bool {
+	for _, t := range ShelteredAccountTaxTypes {
+		if t == taxType {
+			return true
+		}
+	}
+	return false
+}
+
 // TaxProfile is where a person is taxed: a country and, where the country taxes
 // regionally, a region. It resolves to the ordered list of jurisdictions whose
 // rules apply to that person's realized income.

@@ -61,8 +61,14 @@ export interface TaxSummary {
   jurisdictions: JurisdictionSummary[]
 }
 
-export async function getTaxSummary(year: number): Promise<TaxSummary> {
-  const res = await fetch(`${API_BASE}/tax/summary?year=${year}`)
+// showDeferred includes activity every jurisdiction defers - a retirement
+// account's dividends, say. Off by default, and passed here as well as to the
+// ledger so the cards and the list below them always cover the same events.
+export async function getTaxSummary(year: number, showDeferred = false): Promise<TaxSummary> {
+  const params = new URLSearchParams({ year: String(year) })
+  if (showDeferred) params.set('deferred', 'show')
+
+  const res = await fetch(`${API_BASE}/tax/summary?${params}`)
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({}))
@@ -127,6 +133,10 @@ export interface RealizedEventFilters {
   symbol?: string
   holdingId?: string
   accountId?: string
+  // Include events no jurisdiction taxes this year because of the account they
+  // sit in. Omitted or false, the API leaves them out: in the U.S. an IRA is
+  // deferred federally and in every state, so they are rows that owe nothing.
+  showDeferred?: boolean
 }
 
 // Totals by what was realized. How it's taxed differs per jurisdiction and
@@ -158,6 +168,7 @@ export async function getRealizedEvents(
   if (filters.symbol) params.set('symbol', filters.symbol)
   if (filters.holdingId) params.set('holding_id', filters.holdingId)
   if (filters.accountId) params.set('account_id', filters.accountId)
+  if (filters.showDeferred) params.set('deferred', 'show')
 
   const res = await fetch(`${API_BASE}/tax/events?${params}`)
 

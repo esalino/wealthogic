@@ -10,6 +10,11 @@ import { formatDate } from '../lib/datetime'
 
 const PAGE_SIZES = [10, 20, 50]
 
+// Shared by the ledger's filters so a second selector doesn't drift from the
+// first.
+const filterCls =
+  'px-2 py-1 bg-surface-container-low border border-outline-variant rounded-lg text-label-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-secondary/30 focus:border-secondary transition-colors'
+
 // Recent tax years for the selector; the data drives what actually shows.
 // The current year is read in local time: on the evening of Dec 31 in the US the
 // UTC year has already rolled over, which would default the page to a year with
@@ -240,22 +245,29 @@ function TablePagination({ page, setPage, total }: { page: Pagination; setPage: 
 export default function TaxCenter() {
   const [year, setYear] = useState(now.getFullYear())
   const [category, setCategory] = useState('')
+  // Deferred activity is hidden until asked for. A U.S. retirement account is
+  // deferred federally and in every state, so by default it would fill the
+  // ledger with rows that owe nothing this year - but the shelter is a
+  // per-jurisdiction fact, so "show" is one selector away rather than a setting.
+  const [showDeferred, setShowDeferred] = useState(false)
   const [page, setPage] = useState<Pagination>({ pageIndex: 0, pageSize: 10 })
 
   // Everything realized in the year, from both ledgers - capital gains,
   // Treasury interest, and dividends alike. Fetching only gains here is what
   // left income off the list while the jurisdiction cards still counted it.
   const { data, isLoading, isError } = useQuery({
-    queryKey: ['tax', 'events', year, category, page.pageIndex, page.pageSize],
-    queryFn: () => getRealizedEvents(year, page.pageIndex + 1, page.pageSize, { category }),
+    queryKey: ['tax', 'events', year, category, showDeferred, page.pageIndex, page.pageSize],
+    queryFn: () => getRealizedEvents(year, page.pageIndex + 1, page.pageSize, { category, showDeferred }),
   })
 
   // Taxable income per jurisdiction, already bucketed and labeled by the API
   // from the tax treatments stored when each event was realized. The page no
   // longer decides what's taxable where - the jurisdiction rules do.
+  // The same selector drives the cards, so what they total and what the ledger
+  // lists never describe different sets of events.
   const { data: taxData, isLoading: taxLoading } = useQuery({
-    queryKey: ['tax', 'summary', year],
-    queryFn: () => getTaxSummary(year),
+    queryKey: ['tax', 'summary', year, showDeferred],
+    queryFn: () => getTaxSummary(year, showDeferred),
   })
 
   const rows = data?.data ?? []
@@ -294,6 +306,7 @@ export default function TaxCenter() {
         {!taxLoading && jurisdictions.length === 0 && (
           <div className="bg-surface-container-lowest rounded-xl shadow-card p-6 text-body-md text-on-surface-variant">
             No taxable activity in {year}.
+            {!showDeferred && ' Deferred activity is hidden.'}
           </div>
         )}
         {jurisdictions.map((j) => (
@@ -311,12 +324,21 @@ export default function TaxCenter() {
               <select
                 value={category}
                 onChange={(e) => { setCategory(e.target.value); setPage({ pageIndex: 0, pageSize: page.pageSize }) }}
-                className="px-2 py-1 bg-surface-container-low border border-outline-variant rounded-lg text-label-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-secondary/30 focus:border-secondary transition-colors"
+                className={filterCls}
               >
                 <option value="">All kinds</option>
                 {Object.entries(CATEGORY_LABEL).map(([value, lbl]) => (
                   <option key={value} value={value}>{lbl}</option>
                 ))}
+              </select>
+              <select
+                value={showDeferred ? 'show' : 'hide'}
+                onChange={(e) => { setShowDeferred(e.target.value === 'show'); setPage({ pageIndex: 0, pageSize: page.pageSize }) }}
+                className={filterCls}
+                title="Activity no jurisdiction taxes this year because of the account it sits in - a retirement account's gains and income"
+              >
+                <option value="hide">Hide deferred</option>
+                <option value="show">Show deferred</option>
               </select>
             </div>
           </div>
@@ -352,7 +374,14 @@ export default function TaxCenter() {
                 <tr><td colSpan={6} className="px-6 py-10 text-center text-body-md text-error">Failed to load realized income.</td></tr>
               )}
               {!isLoading && !isError && rows.length === 0 && (
-                <tr><td colSpan={6} className="px-6 py-10 text-center text-body-md text-on-surface-variant">No realized income or gains in {year}.</td></tr>
+                <tr>
+                  <td colSpan={6} className="px-6 py-10 text-center text-body-md text-on-surface-variant">
+                    No realized income or gains in {year}.
+                    {/* An all-deferred year reads as an empty ledger otherwise,
+                        which looks like missing data rather than a hidden row. */}
+                    {!showDeferred && ' Deferred activity is hidden.'}
+                  </td>
+                </tr>
               )}
               {rows.map((g) => {
                 // Holding period only characterizes a capital gain - a Treasury's
