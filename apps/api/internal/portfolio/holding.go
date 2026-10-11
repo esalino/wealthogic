@@ -180,7 +180,13 @@ func RecalcHolding(tx *gorm.DB, holding *models.Holding) error {
 	}
 	holding.Status = DeriveStatus(quantity, closings)
 
-	return tx.Save(holding).Error
+	if err := tx.Save(holding).Error; err != nil {
+		return err
+	}
+
+	// Every change to the ledger ends here, so this is where journaled trades
+	// catch up with it - a new sell exiting one, a deleted buy leaving it.
+	return SyncHoldingTrades(tx, holding.ID)
 }
 
 // DeriveStatus decides a holding's status from its position and its ledger.

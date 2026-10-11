@@ -37,6 +37,7 @@ func Connect() (*gorm.DB, error) {
 		&models.Distribution{}, &models.RealizedEvent{}, &models.Upload{}, &models.UploadTransaction{},
 		&models.TaxJurisdiction{}, &models.TaxRule{}, &models.TaxProfile{}, &models.TaxTreatment{},
 		&models.AdminLog{}, &models.TaxLot{}, &models.StockSplit{},
+		&models.Strategy{}, &models.StrategyRule{}, &models.Trade{}, &models.TradeFill{}, &models.TradeRuleCheck{},
 	); err != nil {
 		return nil, err
 	}

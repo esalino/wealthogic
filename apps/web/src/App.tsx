@@ -4,6 +4,7 @@ import Dashboard from './pages/Dashboard'
 import Accounts from './pages/Accounts'
 import UploadCenter from './pages/UploadCenter'
 import Portfolio from './pages/Portfolio'
+import Trades from './pages/Trades'
 import TaxCenter from './pages/TaxCenter'
 import Admin from './pages/Admin'
 import Settings from './pages/Settings'
@@ -18,6 +19,7 @@ export default function App() {
           <Route path="accounts" element={<Accounts />} />
           <Route path="upload" element={<UploadCenter />} />
           <Route path="portfolio" element={<Portfolio />} />
+          <Route path="trades" element={<Trades />} />
           <Route path="tax" element={<TaxCenter />} />
           <Route path="admin" element={<Admin />} />
           <Route path="settings" element={<Settings />} />

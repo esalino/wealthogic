@@ -833,6 +833,255 @@ const docTemplate = `{
                 }
             }
         },
+        "/strategies": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "strategies"
+                ],
+                "summary": "List strategies with their rules",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "active or retired; omit for both",
+                        "name": "status",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/Strategy"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            },
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "strategies"
+                ],
+                "summary": "Create a strategy",
+                "parameters": [
+                    {
+                        "description": "Strategy payload",
+                        "name": "strategy",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/StrategyRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/Strategy"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/strategies/performance": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "strategies"
+                ],
+                "summary": "Closed-trade performance by strategy",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Limit to one account",
+                        "name": "account_id",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/StrategyPerformance"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/strategies/{id}": {
+            "put": {
+                "description": "Trades already started under the strategy keep the rules they were judged by.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "strategies"
+                ],
+                "summary": "Replace a strategy and its rules",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Strategy ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Strategy payload",
+                        "name": "strategy",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/StrategyRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/Strategy"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "description": "Soft-deletes it. Trades taken under it keep the link and their rule checks.",
+                "tags": [
+                    "strategies"
+                ],
+                "summary": "Delete a strategy",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Strategy ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/tax-lots": {
             "get": {
                 "produces": [
@@ -1324,6 +1573,606 @@ const docTemplate = `{
                 }
             }
         },
+        "/trades": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "trades"
+                ],
+                "summary": "List trades, newest first",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "open or closed",
+                        "name": "status",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Limit to one strategy",
+                        "name": "strategy_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Limit to one account",
+                        "name": "account_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Trades with a fill in this holding",
+                        "name": "holding_id",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/Trade"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            },
+            "post": {
+                "description": "Creates the trade with the transaction as its first entry, snapshots the strategy's rules onto it, and attaches any later closes that exit it.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "trades"
+                ],
+                "summary": "Start a trade from an opening transaction",
+                "parameters": [
+                    {
+                        "description": "Trade payload",
+                        "name": "trade",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/CreateTradeRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/Trade"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/trades/{id}": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "trades"
+                ],
+                "summary": "Get a trade with its fills and rule checks",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Trade ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/Trade"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "description": "Removes the journal entry, its fills and rule checks. The transactions are untouched; closes it held may be picked up by other open trades.",
+                "tags": [
+                    "trades"
+                ],
+                "summary": "Delete a trade",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Trade ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            },
+            "patch": {
+                "description": "Replaces the plan. Moving the trade to a different strategy replaces its rule checklist with the new strategy's, unanswered.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "trades"
+                ],
+                "summary": "Update a trade's plan and journal fields",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Trade ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Trade payload",
+                        "name": "trade",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/UpdateTradeRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/Trade"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/trades/{id}/candidates": {
+            "get": {
+                "description": "Opening and closing transactions in the trade's account, on its underlying (the stock and its options), since it opened, with shares no trade holds yet.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "trades"
+                ],
+                "summary": "Transactions that could be added to a trade",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Trade ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/TradeCandidate"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/trades/{id}/fills": {
+            "post": {
+                "description": "Adds an entry (a scale-in, or another leg on the same underlying) or an exit. An exit given without a quantity is sized like an auto fill, to what the trade had open; with one it is pinned as a manual fill.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "trades"
+                ],
+                "summary": "Attach a transaction to a trade",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Trade ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Fill payload",
+                        "name": "fill",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/AddFillRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/Trade"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/trades/{id}/fills/{fill_id}": {
+            "delete": {
+                "description": "A manual fill is removed. An auto fill is detached instead, so the sync doesn't attach it again; adding it back re-attaches it.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "trades"
+                ],
+                "summary": "Take a fill off a trade",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Trade ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Fill ID",
+                        "name": "fill_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/Trade"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            },
+            "patch": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "trades"
+                ],
+                "summary": "Record an exit reason or resize a fill",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Trade ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Fill ID",
+                        "name": "fill_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Fill payload",
+                        "name": "fill",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/UpdateFillRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/Trade"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/trades/{id}/rule-checks": {
+            "put": {
+                "description": "Sets met (true, false, or null for unanswered) on each check listed; checks not listed are left alone.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "trades"
+                ],
+                "summary": "Answer a trade's rule checklist",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Trade ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Checks",
+                        "name": "checks",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/RuleCheckInput"
+                            }
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/Trade"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/transactions": {
             "get": {
                 "produces": [
@@ -1795,6 +2644,18 @@ const docTemplate = `{
                 }
             }
         },
+        "AddFillRequest": {
+            "type": "object",
+            "properties": {
+                "quantity": {
+                    "description": "Quantity in the transaction's own shares; omitted means all of it that\nno other trade holds.",
+                    "type": "number"
+                },
+                "transaction_id": {
+                    "type": "string"
+                }
+            }
+        },
         "AdminLog": {
             "type": "object",
             "properties": {
@@ -2017,6 +2878,42 @@ const docTemplate = `{
                 },
                 "purchase_quantity": {
                     "type": "number"
+                }
+            }
+        },
+        "CreateTradeRequest": {
+            "type": "object",
+            "properties": {
+                "initial_stop": {
+                    "type": "number"
+                },
+                "met_rule_ids": {
+                    "description": "MetRuleIDs are the strategy's entry and risk rules the setup met.\nOmitted leaves the checklist unanswered.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "notes": {
+                    "type": "string"
+                },
+                "planned_risk": {
+                    "description": "PlannedRisk overrides the risk derived from the stop.",
+                    "type": "number"
+                },
+                "quantity": {
+                    "description": "Quantity of it that belongs to the trade, in its own shares. Omitted\nmeans all of it that no other trade holds.",
+                    "type": "number"
+                },
+                "strategy_id": {
+                    "type": "string"
+                },
+                "target": {
+                    "type": "number"
+                },
+                "transaction_id": {
+                    "description": "TransactionID is the opening trade the journal entry starts from - a buy,\nor a sell-to-open for a written option.",
+                    "type": "string"
                 }
             }
         },
@@ -2623,6 +3520,17 @@ const docTemplate = `{
                 }
             }
         },
+        "RuleCheckInput": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "string"
+                },
+                "met": {
+                    "type": "boolean"
+                }
+            }
+        },
         "StockSplit": {
             "type": "object",
             "properties": {
@@ -2646,6 +3554,126 @@ const docTemplate = `{
                     "type": "number"
                 },
                 "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "Strategy": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "direction": {
+                    "description": "Direction is DirectionLong, DirectionShort, or \"both\". Timeframe is free\ntext (\"swing\", \"daily\", \"weeks\") - descriptive only.",
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "rules": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/StrategyRule"
+                    }
+                },
+                "status": {
+                    "type": "string"
+                },
+                "timeframe": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "StrategyPerformance": {
+            "type": "object",
+            "properties": {
+                "strategies": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/TradeStats"
+                    }
+                },
+                "total": {
+                    "$ref": "#/definitions/TradeStats"
+                }
+            }
+        },
+        "StrategyRequest": {
+            "type": "object",
+            "required": [
+                "name"
+            ],
+            "properties": {
+                "description": {
+                    "type": "string"
+                },
+                "direction": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "rules": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/StrategyRuleInput"
+                    }
+                },
+                "status": {
+                    "type": "string"
+                },
+                "timeframe": {
+                    "type": "string"
+                }
+            }
+        },
+        "StrategyRule": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "kind": {
+                    "type": "string"
+                },
+                "sort_order": {
+                    "type": "integer"
+                },
+                "strategy_id": {
+                    "type": "string"
+                },
+                "text": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "StrategyRuleInput": {
+            "type": "object",
+            "required": [
+                "kind",
+                "text"
+            ],
+            "properties": {
+                "kind": {
+                    "type": "string"
+                },
+                "text": {
                     "type": "string"
                 }
             }
@@ -2958,6 +3986,261 @@ const docTemplate = `{
                 }
             }
         },
+        "Trade": {
+            "type": "object",
+            "properties": {
+                "account_id": {
+                    "description": "A trade lives in one account. Underlying is the stock the legs are on -\nthe symbol itself for a stock, the option's underlying for a contract -\nso a covered call's shares and calls belong to one trade.",
+                    "type": "string"
+                },
+                "avg_entry_price": {
+                    "type": "number"
+                },
+                "avg_exit_price": {
+                    "type": "number"
+                },
+                "closed_on": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "current_stop": {
+                    "type": "number"
+                },
+                "direction": {
+                    "description": "Direction is the side of the first leg: long for a buy, short for a\nwritten option.",
+                    "type": "string"
+                },
+                "entry_value": {
+                    "type": "number"
+                },
+                "fees": {
+                    "type": "number"
+                },
+                "fills": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/TradeFill"
+                    }
+                },
+                "gross_pnl": {
+                    "type": "number"
+                },
+                "holding_days": {
+                    "type": "integer"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "initial_stop": {
+                    "description": "The plan. Prices are per share, as quoted. InitialStop is where the stop\nwas when the trade was taken and isn't meant to move - R is measured\nagainst it - while CurrentStop tracks a trailing stop.\n\nPlannedRisk is the dollars at stake if the initial stop is hit. It's\nderived from the stop for a single-leg trade, but stored because a\nmulti-leg position has no single stop price to derive it from.",
+                    "type": "number"
+                },
+                "net_pnl": {
+                    "type": "number"
+                },
+                "notes": {
+                    "type": "string"
+                },
+                "open_quantity": {
+                    "description": "Cached figures, recomputed from the fills on every sync. Realized only:\nwhat's still open is valued at read time against the holding's price\n(UnrealizedPnL), since a reprice doesn't run the sync.\n\nOpenQuantity and the average prices are the first leg's, in today's\nshares, so they line up with the holding's current price. EntryValue is\nthe price-only value of every entry, the capital the trade put to work.\nGrossPnL is price-only; NetPnL takes off commission and fees.",
+                    "type": "number"
+                },
+                "opened_on": {
+                    "type": "string"
+                },
+                "planned_risk": {
+                    "type": "number"
+                },
+                "r_multiple": {
+                    "description": "RMultiple is NetPnL over PlannedRisk, set once the trade is closed - a\npartial result in R would read as a final one.",
+                    "type": "number"
+                },
+                "rating": {
+                    "description": "1-5, the user's grade of how the trade was executed",
+                    "type": "integer"
+                },
+                "return_percent": {
+                    "type": "number"
+                },
+                "rule_checks": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/TradeRuleCheck"
+                    }
+                },
+                "status": {
+                    "description": "Status, OpenedOn and ClosedOn are derived from the fills on every sync:\nopened at the first entry, closed on the exit that left every leg flat.",
+                    "type": "string"
+                },
+                "strategy": {
+                    "$ref": "#/definitions/Strategy"
+                },
+                "strategy_id": {
+                    "type": "string"
+                },
+                "structure": {
+                    "type": "string"
+                },
+                "target": {
+                    "type": "number"
+                },
+                "underlying": {
+                    "type": "string"
+                },
+                "unrealized_pnl": {
+                    "type": "number"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "TradeCandidate": {
+            "type": "object",
+            "properties": {
+                "available_quantity": {
+                    "type": "number"
+                },
+                "detached": {
+                    "description": "Detached is set when it was auto-attached to this trade once and the\nuser took it off.",
+                    "type": "boolean"
+                },
+                "transaction": {
+                    "$ref": "#/definitions/Transaction"
+                }
+            }
+        },
+        "TradeFill": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "detached": {
+                    "type": "boolean"
+                },
+                "exit_reason": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "quantity": {
+                    "type": "number"
+                },
+                "source": {
+                    "type": "string"
+                },
+                "trade_id": {
+                    "type": "string"
+                },
+                "transaction": {
+                    "$ref": "#/definitions/Transaction"
+                },
+                "transaction_id": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "TradeRuleCheck": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "kind": {
+                    "type": "string"
+                },
+                "met": {
+                    "type": "boolean"
+                },
+                "sort_order": {
+                    "type": "integer"
+                },
+                "text": {
+                    "type": "string"
+                },
+                "trade_id": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "TradeStats": {
+            "type": "object",
+            "properties": {
+                "avg_holding_days": {
+                    "type": "number"
+                },
+                "avg_loss": {
+                    "description": "negative",
+                    "type": "number"
+                },
+                "avg_r": {
+                    "description": "AvgR is averaged over the trades that had a planned risk (RTrades of\nthem), since a trade without a stop has no R.",
+                    "type": "number"
+                },
+                "avg_win": {
+                    "type": "number"
+                },
+                "expectancy": {
+                    "type": "number"
+                },
+                "largest_loss": {
+                    "type": "number"
+                },
+                "largest_win": {
+                    "type": "number"
+                },
+                "losses": {
+                    "type": "integer"
+                },
+                "max_drawdown": {
+                    "description": "MaxDrawdown is the largest peak-to-trough fall of cumulative net P\u0026L,\ntaking trades in the order they closed. Positive, in dollars.",
+                    "type": "number"
+                },
+                "net_pnl": {
+                    "type": "number"
+                },
+                "profit_factor": {
+                    "description": "ProfitFactor is gross winnings over gross losses; Expectancy is the\naverage net result per trade.",
+                    "type": "number"
+                },
+                "r_trades": {
+                    "type": "integer"
+                },
+                "rule_adherence": {
+                    "description": "RuleAdherence is the percent of answered rule checks that were met,\nacross these trades. Nil when none were answered.",
+                    "type": "number"
+                },
+                "strategy_id": {
+                    "type": "string"
+                },
+                "strategy_name": {
+                    "type": "string"
+                },
+                "trades": {
+                    "type": "integer"
+                },
+                "win_rate": {
+                    "description": "percent",
+                    "type": "number"
+                },
+                "wins": {
+                    "type": "integer"
+                }
+            }
+        },
         "Transaction": {
             "type": "object",
             "properties": {
@@ -3022,6 +4305,18 @@ const docTemplate = `{
                 }
             }
         },
+        "UpdateFillRequest": {
+            "type": "object",
+            "properties": {
+                "exit_reason": {
+                    "type": "string"
+                },
+                "quantity": {
+                    "description": "Quantity, when set, pins the fill at that size; an auto fill becomes a\nmanual one, so the sync stops resizing it.",
+                    "type": "number"
+                }
+            }
+        },
         "UpdateHoldingRequest": {
             "type": "object",
             "properties": {
@@ -3081,6 +4376,36 @@ const docTemplate = `{
                     "type": "number"
                 },
                 "purchase_quantity": {
+                    "type": "number"
+                }
+            }
+        },
+        "UpdateTradeRequest": {
+            "type": "object",
+            "properties": {
+                "current_stop": {
+                    "type": "number"
+                },
+                "initial_stop": {
+                    "type": "number"
+                },
+                "notes": {
+                    "type": "string"
+                },
+                "planned_risk": {
+                    "description": "PlannedRisk overrides the risk derived from the initial stop; leave it\nout to derive it.",
+                    "type": "number"
+                },
+                "rating": {
+                    "type": "integer"
+                },
+                "strategy_id": {
+                    "type": "string"
+                },
+                "structure": {
+                    "type": "string"
+                },
+                "target": {
                     "type": "number"
                 }
             }

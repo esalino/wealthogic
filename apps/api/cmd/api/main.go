@@ -65,6 +65,8 @@ func main() {
 	uploadHandler := handlers.NewUploadHandler(database, enricher)
 	taxHandler := handlers.NewTaxHandler(database)
 	adminHandler := handlers.NewAdminHandler(database)
+	strategyHandler := handlers.NewStrategyHandler(database)
+	tradeHandler := handlers.NewTradeHandler(database)
 
 	r := gin.Default()
 
@@ -119,6 +121,21 @@ func main() {
 	r.GET("/tax/profiles", taxHandler.GetProfiles)
 	r.PUT("/tax/profiles", taxHandler.PutProfile)
 	r.POST("/tax/recompute", taxHandler.Recompute)
+	r.GET("/strategies", strategyHandler.GetStrategies)
+	r.POST("/strategies", strategyHandler.CreateStrategy)
+	r.GET("/strategies/performance", strategyHandler.GetPerformance)
+	r.PUT("/strategies/:id", strategyHandler.UpdateStrategy)
+	r.DELETE("/strategies/:id", strategyHandler.DeleteStrategy)
+	r.GET("/trades", tradeHandler.GetTrades)
+	r.POST("/trades", tradeHandler.CreateTrade)
+	r.GET("/trades/:id", tradeHandler.GetTrade)
+	r.PATCH("/trades/:id", tradeHandler.UpdateTrade)
+	r.DELETE("/trades/:id", tradeHandler.DeleteTrade)
+	r.GET("/trades/:id/candidates", tradeHandler.GetCandidates)
+	r.POST("/trades/:id/fills", tradeHandler.AddFill)
+	r.PATCH("/trades/:id/fills/:fill_id", tradeHandler.UpdateFill)
+	r.DELETE("/trades/:id/fills/:fill_id", tradeHandler.RemoveFill)
+	r.PUT("/trades/:id/rule-checks", tradeHandler.UpdateRuleChecks)
 
 	r.GET("/admin/logs/latest", adminHandler.GetLatestLogs)
 

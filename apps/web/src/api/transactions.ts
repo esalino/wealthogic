@@ -8,6 +8,10 @@ export interface Transaction {
   symbol: string
   asset_description: string | null
   action: string
+  // What the trade does to the position: 'open' or 'close', on the 'long' or
+  // 'short' side. Empty on actions that aren't trades.
+  effect: string
+  direction: string
   date: string
   quantity: number | null
   price: number | null

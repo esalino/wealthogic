@@ -26,6 +26,9 @@ import {
 } from '../api/distributions'
 import { getJurisdictions } from '../api/tax'
 import { getAccounts } from '../api/accounts'
+import { getTrades, type Trade as ApiTrade } from '../api/trades'
+import StartTradeModal, { type StartTradeTarget } from '../components/StartTradeModal'
+import { useNavigate } from 'react-router-dom'
 
 type ChangeDirection = 'positive' | 'negative' | 'neutral'
 
@@ -94,10 +97,11 @@ function toViewHolding(h: ApiHolding, totalMarketValue: number): Holding {
   }
 }
 
-const subTabs = ['Tax Lots', 'Transactions', 'Dividends'] as const
+const subTabs = ['Tax Lots', 'Transactions', 'Trades', 'Dividends'] as const
 type SubTab = (typeof subTabs)[number]
 
-const addLabels: Record<SubTab, string> = {
+// Trades have no add button: one starts from a buy, on the row that bought.
+const addLabels: Partial<Record<SubTab, string>> = {
   'Tax Lots': 'Add Lot',
   Transactions: 'Add Transaction',
   Dividends: 'Add Dividend',
@@ -271,7 +275,8 @@ function SortableHeader({
   )
 }
 
-function SubPanel({ holding, activeTab, onTabChange, onAddLot, onEditLot, onAddTransaction, onEditTransaction, onAddDividend, onEditDividend }: { holding: Holding; activeTab: SubTab; onTabChange: (t: SubTab) => void; onAddLot: () => void; onEditLot: (lot: ApiTaxLot) => void; onAddTransaction: () => void; onEditTransaction: (txn: ApiTransaction) => void; onAddDividend: () => void; onEditDividend: (dist: ApiDistribution) => void }) {
+function SubPanel({ holding, activeTab, onTabChange, onAddLot, onEditLot, onAddTransaction, onEditTransaction, onAddDividend, onEditDividend, onStartTrade }: { holding: Holding; activeTab: SubTab; onTabChange: (t: SubTab) => void; onAddLot: () => void; onEditLot: (lot: ApiTaxLot) => void; onAddTransaction: () => void; onEditTransaction: (txn: ApiTransaction) => void; onAddDividend: () => void; onEditDividend: (dist: ApiDistribution) => void; onStartTrade: (txn: StartTradeTarget) => void }) {
+  const navigate = useNavigate()
   // Lazy-load this holding's tax lots when the row is opened. Keyed by holding
   // id so createTaxLot's invalidation of ['tax-lots'] refetches this list.
   const { data: taxLotsData, isLoading: lotsLoading } = useQuery({
@@ -295,6 +300,26 @@ function SubPanel({ holding, activeTab, onTabChange, onAddLot, onEditLot, onAddT
   })
   const dists = distsData?.data ?? []
 
+  // Journaled trades with a fill in this holding, and how much of each opening
+  // transaction they already hold - a buy whose shares are all in trades can't
+  // start another.
+  const { data: trades = [], isLoading: tradesLoading } = useQuery({
+    queryKey: ['trades', 'holding', holding.id],
+    queryFn: () => getTrades({ holdingId: holding.id }),
+  })
+  const tradeOfTxn = new Map<string, ApiTrade>()
+  const inTrades = new Map<string, number>()
+  for (const t of trades) {
+    for (const f of t.fills) {
+      if (f.detached) continue
+      tradeOfTxn.set(f.transaction_id, t)
+      inTrades.set(f.transaction_id, (inTrades.get(f.transaction_id) ?? 0) + f.quantity)
+    }
+  }
+  const canStartTrade = (txnId: string, quantity: number | null) =>
+    quantity != null && Math.abs(quantity) - (inTrades.get(txnId) ?? 0) > 1e-9
+  const openInJournal = (tradeId: string) => navigate(`/trades?trade=${tradeId}`)
+
   const queryClient = useQueryClient()
   const deleteTxn = useMutation({
     mutationFn: deleteTransaction,
@@ -302,6 +327,7 @@ function SubPanel({ holding, activeTab, onTabChange, onAddLot, onEditLot, onAddT
       // Deleting a sell returns shares to the lots and recomputes the holding.
       queryClient.invalidateQueries({ queryKey: ['transactions'] })
       queryClient.invalidateQueries({ queryKey: ['tax-lots'] })
+      queryClient.invalidateQueries({ queryKey: ['trades'] })
       queryClient.invalidateQueries({ queryKey: ['holdings'] })
     },
   })
@@ -338,13 +364,15 @@ function SubPanel({ holding, activeTab, onTabChange, onAddLot, onEditLot, onAddT
             )
           })}
         </div>
-        <button
-          onClick={activeTab === 'Tax Lots' ? onAddLot : activeTab === 'Transactions' ? onAddTransaction : onAddDividend}
-          className="flex items-center gap-1 pb-2 text-label-sm font-semibold text-secondary hover:opacity-80 transition-opacity"
-        >
-          <span className="material-symbols-outlined text-base">add</span>
-          {addLabels[activeTab]}
-        </button>
+        {addLabels[activeTab] && (
+          <button
+            onClick={activeTab === 'Tax Lots' ? onAddLot : activeTab === 'Transactions' ? onAddTransaction : onAddDividend}
+            className="flex items-center gap-1 pb-2 text-label-sm font-semibold text-secondary hover:opacity-80 transition-opacity"
+          >
+            <span className="material-symbols-outlined text-base">add</span>
+            {addLabels[activeTab]}
+          </button>
+        )}
       </div>
 
       {/* A split resizes lots, so it's recorded where lots are read. Only
@@ -429,7 +457,23 @@ function SubPanel({ holding, activeTab, onTabChange, onAddLot, onEditLot, onAddT
                         )}
                       </td>
                       <td className="px-4 py-3 text-right w-10">
-                        <RowMenu onEdit={() => onEditLot(lot)} />
+                        <RowMenu
+                          onEdit={() => onEditLot(lot)}
+                          extra={canStartTrade(lot.opening_transaction_id, lot.purchase_quantity) ? [{
+                            icon: 'candlestick_chart',
+                            label: 'Start trade',
+                            onClick: () => onStartTrade({
+                              id: lot.opening_transaction_id,
+                              symbol: lot.symbol,
+                              action: lot.direction === 'short' ? 'Sell' : 'Buy',
+                              date: lot.purchase_date,
+                              quantity: lot.purchase_quantity,
+                              price: lot.purchase_price,
+                              direction: lot.direction,
+                              asset_type: lot.asset_type,
+                            }),
+                          }] : undefined}
+                        />
                       </td>
                     </tr>
                   )
@@ -469,6 +513,16 @@ function SubPanel({ holding, activeTab, onTabChange, onAddLot, onEditLot, onAddT
                       <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-surface-container-high text-on-surface-variant text-[10px] font-bold">
                         {txn.action}
                       </span>
+                      {tradeOfTxn.has(txn.id) && (
+                        <button
+                          onClick={() => openInJournal(tradeOfTxn.get(txn.id)!.id)}
+                          title={`Part of a ${tradeOfTxn.get(txn.id)!.strategy?.name ?? ''} trade - open in the journal`}
+                          className="ml-2 inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full bg-secondary/10 text-secondary text-[10px] font-bold hover:opacity-80"
+                        >
+                          <span className="material-symbols-outlined text-xs">candlestick_chart</span>
+                          Trade
+                        </button>
+                      )}
                     </td>
                     <td className="px-4 py-3 text-right">{txn.quantity != null ? fmtNumber(txn.quantity) : '—'}</td>
                     <td className="px-4 py-3 text-right">{txn.price != null ? fmtCurrency(txn.price) : '—'}</td>
@@ -479,7 +533,66 @@ function SubPanel({ holding, activeTab, onTabChange, onAddLot, onEditLot, onAddT
                       {txn.realized_gains !== 0 ? fmtSignedCurrency(txn.realized_gains) : '—'}
                     </td>
                     <td className="px-4 py-3 text-right w-10">
-                      <RowMenu onEdit={() => onEditTransaction(txn)} onDelete={() => deleteTxn.mutate(txn.id)} />
+                      <RowMenu
+                        onEdit={() => onEditTransaction(txn)}
+                        onDelete={() => deleteTxn.mutate(txn.id)}
+                        extra={txn.effect === 'open' && canStartTrade(txn.id, txn.quantity)
+                          ? [{ icon: 'candlestick_chart', label: 'Start trade', onClick: () => onStartTrade(txn) }]
+                          : undefined}
+                      />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </>
+          )}
+
+          {activeTab === 'Trades' && (
+            <>
+              <thead className="bg-surface-container-low">
+                <tr className="text-[10px] text-label-caps text-on-surface-variant uppercase">
+                  <th className="px-4 py-2">Opened</th>
+                  <th className="px-4 py-2">Strategy</th>
+                  <th className="px-4 py-2">Status</th>
+                  <th className="px-4 py-2 text-right">Avg Entry</th>
+                  <th className="px-4 py-2 text-right">Avg Exit</th>
+                  <th className="px-4 py-2 text-right">Net P&amp;L</th>
+                  <th className="px-4 py-2 text-right">R</th>
+                  <th className="px-4 py-2 w-10" />
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-outline-variant">
+                {tradesLoading && (
+                  <tr>
+                    <td colSpan={8} className="px-4 py-6 text-center text-body-sm text-on-surface-variant">Loading trades…</td>
+                  </tr>
+                )}
+                {!tradesLoading && trades.length === 0 && (
+                  <tr>
+                    <td colSpan={8} className="px-4 py-6 text-center text-body-sm text-on-surface-variant">
+                      No trades yet. Start one from a buy on the Transactions or Tax Lots tab.
+                    </td>
+                  </tr>
+                )}
+                {!tradesLoading && trades.map((t) => (
+                  <tr key={t.id} className="text-data-tabular text-on-surface tabular-nums">
+                    <td className="px-4 py-3">{t.opened_on ? formatDate(t.opened_on) : '—'}</td>
+                    <td className="px-4 py-3">{t.strategy?.name ?? <span className="text-on-surface-variant">—</span>}</td>
+                    <td className="px-4 py-3">
+                      <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-surface-container-high text-on-surface-variant text-[10px] font-bold uppercase">
+                        {t.status === 'open' ? `Open · ${fmtNumber(t.open_quantity)}` : `Closed ${t.closed_on ? formatDate(t.closed_on) : ''}`}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-right">{fmtCurrency(t.avg_entry_price)}</td>
+                    <td className="px-4 py-3 text-right">{t.avg_exit_price ? fmtCurrency(t.avg_exit_price) : '—'}</td>
+                    <td className={`px-4 py-3 text-right font-semibold ${t.net_pnl < 0 ? 'text-error' : t.net_pnl > 0 ? 'text-secondary' : 'text-on-surface'}`}>
+                      {fmtSignedCurrency(t.net_pnl)}
+                    </td>
+                    <td className="px-4 py-3 text-right">{t.r_multiple != null ? `${t.r_multiple.toFixed(2)}R` : '—'}</td>
+                    <td className="px-4 py-3 text-right w-10">
+                      <button onClick={() => openInJournal(t.id)} title="Open in the journal" className="text-on-surface-variant hover:text-primary">
+                        <span className="material-symbols-outlined text-lg align-middle">open_in_new</span>
+                      </button>
                     </td>
                   </tr>
                 ))}
@@ -992,7 +1105,7 @@ function EditHoldingModal({ holding, onClose }: { holding: ApiHolding | null; on
 
 // ── Row action menu ───────────────────────────────────────────────────────────
 
-function RowMenu({ onEdit, onDelete }: { onEdit: () => void; onDelete?: () => void }) {
+function RowMenu({ onEdit, onDelete, extra }: { onEdit: () => void; onDelete?: () => void; extra?: { icon: string; label: string; onClick: () => void }[] }) {
   const [open, setOpen] = useState(false)
   const [confirmingDelete, setConfirmingDelete] = useState(false)
   const [pos, setPos] = useState({ top: 0, right: 0 })
@@ -1052,6 +1165,16 @@ function RowMenu({ onEdit, onDelete }: { onEdit: () => void; onDelete?: () => vo
             <span className="material-symbols-outlined text-base">edit</span>
             Edit
           </button>
+          {extra?.map((item) => (
+            <button
+              key={item.label}
+              onClick={() => { closeMenu(); item.onClick() }}
+              className="w-full flex items-center gap-2 px-3 py-2 text-body-md text-on-surface hover:bg-surface-container-low transition-colors"
+            >
+              <span className="material-symbols-outlined text-base">{item.icon}</span>
+              {item.label}
+            </button>
+          ))}
           {onDelete && (
             <button
               onClick={() => {
@@ -1096,6 +1219,7 @@ function AddTaxLotModal({ holding, onClose }: { holding: { id: string; symbol: s
       // refresh all three.
       queryClient.invalidateQueries({ queryKey: ['holdings'] })
       queryClient.invalidateQueries({ queryKey: ['tax-lots'] })
+      queryClient.invalidateQueries({ queryKey: ['trades'] })
       queryClient.invalidateQueries({ queryKey: ['transactions'] })
       setAccountId(''); setPurchaseDate(''); setQuantity(''); setPrice(''); setCommission(''); setFees('')
       reset()
@@ -1228,7 +1352,7 @@ function SplitsStrip({ holdingId }: { holdingId: string }) {
   const [newShares, setNewShares] = useState('')
 
   const invalidate = () => {
-    for (const key of ['splits', 'tax-lots', 'holdings', 'transactions', 'tax']) {
+    for (const key of ['splits', 'tax-lots', 'holdings', 'transactions', 'tax', 'trades']) {
       queryClient.invalidateQueries({ queryKey: [key] })
     }
   }
@@ -1342,6 +1466,7 @@ function EditTaxLotModal({ lot, onClose }: { lot: ApiTaxLot | null; onClose: () 
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['holdings'] })
       queryClient.invalidateQueries({ queryKey: ['tax-lots'] })
+      queryClient.invalidateQueries({ queryKey: ['trades'] })
       onClose()
     },
   })
@@ -1470,6 +1595,7 @@ function AddTransactionModal({ holding, onClose }: { holding: { id: string; symb
       // three lists.
       queryClient.invalidateQueries({ queryKey: ['transactions'] })
       queryClient.invalidateQueries({ queryKey: ['tax-lots'] })
+      queryClient.invalidateQueries({ queryKey: ['trades'] })
       queryClient.invalidateQueries({ queryKey: ['holdings'] })
       setAccountId(''); setAction('Buy'); setDate('')
       setQuantity(''); setPrice(''); setCommission(''); setFees('')
@@ -1633,6 +1759,7 @@ function EditTransactionModal({ txn, onClose }: { txn: ApiTransaction | null; on
       // Editing a sell re-derives lot depletion and the holding aggregates.
       queryClient.invalidateQueries({ queryKey: ['transactions'] })
       queryClient.invalidateQueries({ queryKey: ['tax-lots'] })
+      queryClient.invalidateQueries({ queryKey: ['trades'] })
       queryClient.invalidateQueries({ queryKey: ['holdings'] })
       onClose()
     },
@@ -2044,6 +2171,7 @@ export default function Portfolio() {
   const [editingTxn, setEditingTxn] = useState<ApiTransaction | null>(null)
   const [addDistHolding, setAddDistHolding] = useState<DividendTarget | null>(null)
   const [editingDist, setEditingDist] = useState<ApiDistribution | null>(null)
+  const [startTradeTxn, setStartTradeTxn] = useState<StartTradeTarget | null>(null)
 
   const { data, isLoading, isError, error } = useQuery({
     queryKey: ['holdings', pagination.pageIndex, pagination.pageSize, sort.field, sort.direction, statusFilter],
@@ -2323,6 +2451,7 @@ export default function Portfolio() {
                               onEditTransaction={setEditingTxn}
                               onAddDividend={() => setAddDistHolding({ id: h.id, symbol: h.symbol, assetType: h.assetType })}
                               onEditDividend={setEditingDist}
+                              onStartTrade={setStartTradeTxn}
                             />
                           </td>
                         </tr>
@@ -2378,6 +2507,12 @@ export default function Portfolio() {
       <EditTransactionModal key={editingTxn?.id} txn={editingTxn} onClose={() => setEditingTxn(null)} />
       <AddDividendModal key={addDistHolding?.id} holding={addDistHolding} onClose={() => setAddDistHolding(null)} />
       <EditDividendModal key={editingDist?.id} dist={editingDist} onClose={() => setEditingDist(null)} />
+      <StartTradeModal
+        key={startTradeTxn?.id}
+        txn={startTradeTxn}
+        onClose={() => setStartTradeTxn(null)}
+        onStarted={() => setActiveTab('Trades')}
+      />
     </>
   )
 }
