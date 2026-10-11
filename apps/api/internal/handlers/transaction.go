@@ -15,10 +15,6 @@ import (
 	"gorm.io/gorm"
 )
 
-// errInsufficientShares is returned from the create transaction when a sell
-// asks for more shares than the account's open lots hold. It maps to a 400.
-var errInsufficientShares = errors.New("not enough shares to sell")
-
 type TransactionHandler interface {
 	GetTransactions(c *gin.Context)
 	CreateTransaction(c *gin.Context)
@@ -198,12 +194,6 @@ func (h *transactionHandler) CreateTransaction(c *gin.Context) {
 		txn.Effect, txn.Direction = models.EffectClose, models.DirectionLong
 	}
 
-	// A stock buy doubles as a tax lot, so seed its open (remaining) quantity.
-	if isBuy {
-		q := *req.Quantity
-		txn.RemainingQuantity = &q
-	}
-
 	err = h.db.Transaction(func(tx *gorm.DB) error {
 		var holding models.Holding
 		if isBuy || isSell {
@@ -214,6 +204,13 @@ func (h *transactionHandler) CreateTransaction(c *gin.Context) {
 
 		if err := tx.Create(&txn).Error; err != nil {
 			return err
+		}
+
+		// A buy opens a tax lot of its own.
+		if isBuy {
+			if err := portfolio.OpenLot(tx, &txn); err != nil {
+				return err
+			}
 		}
 
 		// A sell consumes shares from open buy lots (FIFO/LIFO per the account),
@@ -229,7 +226,7 @@ func (h *transactionHandler) CreateTransaction(c *gin.Context) {
 				return err
 			}
 			if unfilled > 0 {
-				return errInsufficientShares
+				return portfolio.ErrInsufficientShares
 			}
 			txn.RealizedGains = realized
 			if err := tx.Save(&txn).Error; err != nil {
@@ -242,7 +239,7 @@ func (h *transactionHandler) CreateTransaction(c *gin.Context) {
 		}
 		return nil
 	})
-	if errors.Is(err, errInsufficientShares) {
+	if errors.Is(err, portfolio.ErrInsufficientShares) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "not enough shares to sell"})
 		return
 	}
@@ -267,7 +264,7 @@ type updateTransactionRequest struct {
 
 // UpdateTransaction godoc
 // @Summary      Update a transaction
-// @Description  Updates the transaction; if it belongs to a holding, the holding's lots and aggregates are rebuilt from its buys and sells. A buy's own lot is not changed.
+// @Description  Updates the transaction; if it belongs to a holding, the holding's tax lots and aggregates are rebuilt from its trades, including the lot this transaction opened.
 // @Tags         transactions
 // @Accept       json
 // @Produce      json
@@ -313,7 +310,7 @@ func (h *transactionHandler) UpdateTransaction(c *gin.Context) {
 		return
 	}
 
-	// A buy doubles as a tax lot; editing one whose shares have already been
+	// A buy opens a tax lot; editing one whose shares have already been
 	// sold would corrupt recorded gains. Reject it (revisit later).
 	if strings.EqualFold(txn.Action, "Buy") {
 		disposed, err := buyHasDisposals(h.db, txn.ID)
@@ -346,11 +343,11 @@ func (h *transactionHandler) UpdateTransaction(c *gin.Context) {
 		// whole holding from its buys and sells after any change. Strict so an
 		// edit that over-sells is rejected.
 		if txn.HoldingID != nil {
-			return rebuildHolding(tx, *txn.HoldingID, true)
+			return portfolio.RebuildHolding(tx, *txn.HoldingID, true)
 		}
 		return nil
 	}); err != nil {
-		if errors.Is(err, errInsufficientShares) {
+		if errors.Is(err, portfolio.ErrInsufficientShares) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "not enough shares to sell"})
 			return
 		}
@@ -369,7 +366,7 @@ func (h *transactionHandler) UpdateTransaction(c *gin.Context) {
 
 // DeleteTransaction godoc
 // @Summary      Delete a transaction
-// @Description  Soft-deletes the transaction; if it belongs to a holding, the holding's lots and aggregates are rebuilt from its remaining buys and sells. A buy's own lot is not removed.
+// @Description  Soft-deletes the transaction; if it belongs to a holding, the holding's tax lots and aggregates are rebuilt from its remaining trades, which removes the lot a deleted buy opened.
 // @Tags         transactions
 // @Produce      json
 // @Param        id   path      string  true  "Transaction ID"
@@ -413,11 +410,11 @@ func (h *transactionHandler) DeleteTransaction(c *gin.Context) {
 			return err
 		}
 		if txn.HoldingID != nil {
-			return rebuildHolding(tx, *txn.HoldingID, strict)
+			return portfolio.RebuildHolding(tx, *txn.HoldingID, strict)
 		}
 		return nil
 	}); err != nil {
-		if errors.Is(err, errInsufficientShares) {
+		if errors.Is(err, portfolio.ErrInsufficientShares) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "cannot delete: shares are needed to cover existing sells"})
 			return
 		}
@@ -428,91 +425,13 @@ func (h *transactionHandler) DeleteTransaction(c *gin.Context) {
 	c.Status(http.StatusNoContent)
 }
 
-// buyHasDisposals reports whether any realized event draws from this buy lot,
-// i.e. shares of it have been sold.
+// buyHasDisposals reports whether any realized event draws from the lot this
+// buy opened, i.e. shares of it have been sold.
 func buyHasDisposals(db *gorm.DB, buyID uuid.UUID) (bool, error) {
 	var count int64
-	err := db.Model(&models.RealizedEvent{}).Where("lot_transaction_id = ?", buyID).Count(&count).Error
+	err := db.Model(&models.RealizedEvent{}).
+		Joins("JOIN tax_lots ON tax_lots.id = realized_events.tax_lot_id").
+		Where("tax_lots.opening_transaction_id = ?", buyID).
+		Count(&count).Error
 	return count > 0, err
-}
-
-// rebuildHolding recomputes a holding's lot remaining quantities, per-sell
-// realized gains, realized-event rows, and aggregates by replaying its sells
-// against its buy lots from scratch. A single sell's depletion can't be reversed
-// in isolation, so any create/edit/delete of a holding's buy or sell rebuilds
-// the whole holding.
-//
-// When strict is set (edits), a sell that can't be fully filled from available
-// shares returns errInsufficientShares so the caller can reject it. Deletes of a
-// sell pass strict=false: removing a sell only frees shares, so it must never
-// fail.
-func rebuildHolding(tx *gorm.DB, holdingID uuid.UUID, strict bool) error {
-	// Reset every stock buy lot to its full purchased quantity.
-	if err := tx.Model(&models.Transaction{}).
-		Where("holding_id = ? AND effect = ? AND remaining_quantity IS NOT NULL", holdingID, models.EffectOpen).
-		Update("remaining_quantity", gorm.Expr("quantity")).Error; err != nil {
-		return err
-	}
-
-	// Clear the events this holding's sells produced, and their treatments; the
-	// replay recreates both. Keyed by holding_id, so it also drops rows from
-	// sells that were soft-deleted.
-	//
-	// Scoped to disposals: income events in the same ledger derive from
-	// distributions, which this replay cannot reconstruct, so wiping them here
-	// would destroy records that only exist because a user or an import created
-	// them.
-	if err := portfolio.DeleteHoldingDisposalEvents(tx, holdingID); err != nil {
-		return err
-	}
-
-	// Replay sells oldest first so lots match to sells chronologically.
-	var sells []models.Transaction
-	if err := tx.Where("holding_id = ? AND effect = ?", holdingID, models.EffectClose).
-		Order("date ASC").Order("id ASC").Find(&sells).Error; err != nil {
-		return err
-	}
-
-	// One applier for the whole replay: every sell is evaluated against the same
-	// rules, so they're loaded once rather than per sell.
-	applier, err := tax.NewApplier(tx)
-	if err != nil {
-		return err
-	}
-
-	costBasisMethod := map[uuid.UUID]string{}
-	for i := range sells {
-		sell := &sells[i]
-		var realized float64
-		if sell.Quantity != nil && sell.Price != nil {
-			method, ok := costBasisMethod[sell.AccountID]
-			if !ok {
-				var account models.Account
-				if err := tx.First(&account, "id = ?", sell.AccountID).Error; err == nil {
-					method = account.DefaultCostBasis
-				}
-				costBasisMethod[sell.AccountID] = method
-			}
-			r, unfilled, err := portfolio.DepleteLots(tx, sell, method, applier)
-			if err != nil {
-				return err
-			}
-			// Strict callers (edits) reject a sell that can't be fully filled
-			// from the available shares.
-			if strict && unfilled > 1e-9 {
-				return errInsufficientShares
-			}
-			realized = r
-		}
-		sell.RealizedGains = realized
-		if err := tx.Save(sell).Error; err != nil {
-			return err
-		}
-	}
-
-	var holding models.Holding
-	if err := tx.First(&holding, "id = ?", holdingID).Error; err != nil {
-		return err
-	}
-	return portfolio.RecalcHolding(tx, &holding)
 }

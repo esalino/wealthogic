@@ -112,7 +112,7 @@ export interface RealizedEvent {
   amount: number
   // Source records this was derived from; which are set follows the origin.
   transaction_id: string | null
-  lot_transaction_id: string | null
+  tax_lot_id: string | null
   distribution_id: string | null
   // Lot detail, disposals only.
   acquired_date: string | null

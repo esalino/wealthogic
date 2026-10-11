@@ -528,7 +528,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/github_com_eriksalino_wealthogic_api_internal_marketdata.BackfillResult"
+                            "$ref": "#/definitions/marketdata.BackfillResult"
                         }
                     },
                     "500": {
@@ -560,7 +560,7 @@ const docTemplate = `{
                 "tags": [
                     "holdings"
                 ],
-                "summary": "Recompute every holding's aggregates from its ledger",
+                "summary": "Rebuild every holding's tax lots, realized events and aggregates from its ledger",
                 "responses": {
                     "200": {
                         "description": "OK",
@@ -684,6 +684,155 @@ const docTemplate = `{
                 }
             }
         },
+        "/splits": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "splits"
+                ],
+                "summary": "List a holding's stock splits, oldest first",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Holding ID",
+                        "name": "holding_id",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/StockSplit"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            },
+            "post": {
+                "description": "Every old_shares held before effective_date become new_shares (2-for-1 is 1 -\u003e 2; a 1-for-8 reverse split is 8 -\u003e 1). The holding's lots are rebuilt around it; its transactions are left as traded.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "splits"
+                ],
+                "summary": "Record a stock split",
+                "parameters": [
+                    {
+                        "description": "Split payload",
+                        "name": "split",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/CreateSplitRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/StockSplit"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/splits/{id}": {
+            "delete": {
+                "description": "Rebuilds the holding's lots without it. Rejected if post-split sells would no longer be covered.",
+                "tags": [
+                    "splits"
+                ],
+                "summary": "Delete a stock split",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Split ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/tax-lots": {
             "get": {
                 "produces": [
@@ -741,7 +890,7 @@ const docTemplate = `{
                 }
             },
             "post": {
-                "description": "Records a stock buy against a holding. The buy transaction is the tax lot.",
+                "description": "Records a buy against a holding, which opens the tax lot.",
                 "consumes": [
                     "application/json"
                 ],
@@ -793,7 +942,7 @@ const docTemplate = `{
         },
         "/tax-lots/{id}": {
             "patch": {
-                "description": "Updates the buy transaction behind the lot and recomputes the holding. Rejected if the lot has already been sold from.",
+                "description": "Updates the buy transaction behind the lot, in its as-traded shares, and rebuilds the holding's lots. Rejected if the lot has already been sold from.",
                 "consumes": [
                     "application/json"
                 ],
@@ -807,7 +956,7 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "Tax lot (buy transaction) ID",
+                        "description": "Tax lot ID",
                         "name": "id",
                         "in": "path",
                         "required": true
@@ -1283,7 +1432,7 @@ const docTemplate = `{
         },
         "/transactions/{id}": {
             "delete": {
-                "description": "Soft-deletes the transaction; if it belongs to a holding, the holding's lots and aggregates are rebuilt from its remaining buys and sells. A buy's own lot is not removed.",
+                "description": "Soft-deletes the transaction; if it belongs to a holding, the holding's tax lots and aggregates are rebuilt from its remaining trades, which removes the lot a deleted buy opened.",
                 "produces": [
                     "application/json"
                 ],
@@ -1334,7 +1483,7 @@ const docTemplate = `{
                 }
             },
             "patch": {
-                "description": "Updates the transaction; if it belongs to a holding, the holding's lots and aggregates are rebuilt from its buys and sells. A buy's own lot is not changed.",
+                "description": "Updates the transaction; if it belongs to a holding, the holding's tax lots and aggregates are rebuilt from its trades, including the lot this transaction opened.",
                 "consumes": [
                     "application/json"
                 ],
@@ -1815,6 +1964,28 @@ const docTemplate = `{
                 "tax_class_override": {
                     "description": "TaxClassOverride and IssuerJurisdiction describe the asset's tax\nattributes; nil means \"derive from the asset type\". They replace the old\nstate_tax_exempt flag - what a holding pays and who issued it are facts\nabout the asset, while whether that's exempt is a jurisdiction's rule.",
                     "type": "string"
+                }
+            }
+        },
+        "CreateSplitRequest": {
+            "type": "object",
+            "required": [
+                "effective_date",
+                "new_shares",
+                "old_shares"
+            ],
+            "properties": {
+                "effective_date": {
+                    "type": "string"
+                },
+                "holding_id": {
+                    "type": "string"
+                },
+                "new_shares": {
+                    "type": "number"
+                },
+                "old_shares": {
+                    "type": "number"
                 }
             }
         },
@@ -2342,7 +2513,7 @@ const docTemplate = `{
                 "symbols": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/github_com_eriksalino_wealthogic_api_internal_marketdata.QuotedSymbol"
+                        "$ref": "#/definitions/marketdata.QuotedSymbol"
                     }
                 }
             }
@@ -2354,7 +2525,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "acquired_date": {
-                    "description": "Lot detail, set only for a disposal. Nil on income, which has no lot\nbehind it - distinct from a cost basis that happens to be zero.",
+                    "description": "Lot detail, set only for a disposal. Nil on income, which has no lot\nbehind it - distinct from a cost basis that happens to be zero. Quantity\nis in the shares as they were on EventDate, as a 1099-B reports them, not\nsplit-adjusted to today.",
                     "type": "string"
                 },
                 "amount": {
@@ -2386,9 +2557,6 @@ const docTemplate = `{
                 "id": {
                     "type": "string"
                 },
-                "lot_transaction_id": {
-                    "type": "string"
-                },
                 "origin": {
                     "type": "string"
                 },
@@ -2401,12 +2569,15 @@ const docTemplate = `{
                 "symbol": {
                     "type": "string"
                 },
+                "tax_lot_id": {
+                    "type": "string"
+                },
                 "term": {
                     "description": "\"short\" | \"long\"; empty for income",
                     "type": "string"
                 },
                 "transaction_id": {
-                    "description": "Source links. Two real foreign keys rather than a polymorphic pair, so\neach stays a genuine reference the database can enforce. TransactionID is\nthe realizing sell and LotTransactionID the buy that supplied the shares;\nDistributionID is the income record. Exactly one origin's ids are set.",
+                    "description": "Source links. Two real foreign keys rather than a polymorphic pair, so\neach stays a genuine reference the database can enforce. TransactionID is\nthe realizing trade and TaxLotID the TaxLot it drew from (whose own\nTransactionID is the opening trade); DistributionID is the income record.\nExactly one origin's ids are set.",
                     "type": "string"
                 },
                 "treatments": {
@@ -2449,6 +2620,33 @@ const docTemplate = `{
                 },
                 "open": {
                     "type": "integer"
+                }
+            }
+        },
+        "StockSplit": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "effective_date": {
+                    "description": "EffectiveDate is the first day the shares trade split-adjusted (the\nex-date). A trade on this date is already in post-split shares.",
+                    "type": "string"
+                },
+                "holding_id": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "new_shares": {
+                    "type": "number"
+                },
+                "old_shares": {
+                    "type": "number"
+                },
+                "updated_at": {
+                    "type": "string"
                 }
             }
         },
@@ -2514,6 +2712,9 @@ const docTemplate = `{
                 "account_id": {
                     "type": "string"
                 },
+                "adjusted_price": {
+                    "type": "number"
+                },
                 "asset_description": {
                     "type": "string"
                 },
@@ -2553,6 +2754,9 @@ const docTemplate = `{
                     "description": "MarketValue and the unrealized figures are nil when the holding has no\nprice: an unpriced lot has an unknown value, not a value of zero, and\nreporting zero would show the whole basis as a loss.",
                     "type": "number"
                 },
+                "opening_transaction_id": {
+                    "type": "string"
+                },
                 "purchase_date": {
                     "type": "string"
                 },
@@ -2562,7 +2766,17 @@ const docTemplate = `{
                 "purchase_quantity": {
                     "type": "number"
                 },
+                "quantity": {
+                    "type": "number"
+                },
+                "realized_gains": {
+                    "description": "RealizedGains is what has been realized from the closed part of the lot.",
+                    "type": "number"
+                },
                 "remaining_quantity": {
+                    "type": "number"
+                },
+                "split_factor": {
                     "type": "number"
                 },
                 "symbol": {
@@ -2775,7 +2989,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "effect": {
-                    "description": "Effect and Direction describe what a trade does to the lot ledger, which\nthe action alone can't say once options are involved: writing an option\nOPENS a position by selling, and buying it back CLOSES one.\n\nEffect is \"open\" (creates a lot) or \"close\" (depletes lots); Direction is\n\"long\" or \"short\", saying which side the lot sits on. A stock buy is an\nopen/long and a stock sell a close/long, so the existing behaviour is just\nthe ordinary case of the same rule. Empty on non-lot actions.",
+                    "description": "Effect and Direction describe what a trade does to the lot ledger, which\nthe action alone can't say once options are involved: writing an option\nOPENS a position by selling, and buying it back CLOSES one.\n\nEffect is \"open\" (opens a TaxLot) or \"close\" (depletes lots); Direction is\n\"long\" or \"short\", saying which side the lot sits on. A stock buy is an\nopen/long and a stock sell a close/long, so the existing behaviour is just\nthe ordinary case of the same rule. Empty on non-lot actions.",
                     "type": "string"
                 },
                 "fees": {
@@ -2795,10 +3009,6 @@ const docTemplate = `{
                     "type": "number"
                 },
                 "realized_gains": {
-                    "type": "number"
-                },
-                "remaining_quantity": {
-                    "description": "RemainingQuantity is set only on a stock buy, which doubles as a tax lot:\nit's the shares of this purchase still open (quantity minus what later\nsells have disposed). Nil for sells and other actions. Maintained as a\ncache by the recompute; the Gain ledger is the source of truth.",
                     "type": "number"
                 },
                 "settlement_date": {
@@ -3041,7 +3251,7 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_eriksalino_wealthogic_api_internal_marketdata.BackfillResult": {
+        "marketdata.BackfillResult": {
             "type": "object",
             "properties": {
                 "considered": {
@@ -3065,7 +3275,7 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_eriksalino_wealthogic_api_internal_marketdata.QuotedSymbol": {
+        "marketdata.QuotedSymbol": {
             "type": "object",
             "properties": {
                 "as_of": {

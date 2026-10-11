@@ -163,6 +163,21 @@ definitions:
     - asset_type
     - description
     type: object
+  CreateSplitRequest:
+    properties:
+      effective_date:
+        type: string
+      holding_id:
+        type: string
+      new_shares:
+        type: number
+      old_shares:
+        type: number
+    required:
+    - effective_date
+    - new_shares
+    - old_shares
+    type: object
   CreateTaxLotRequest:
     properties:
       account_id:
@@ -552,7 +567,7 @@ definitions:
         type: string
       symbols:
         items:
-          $ref: '#/definitions/github_com_eriksalino_wealthogic_api_internal_marketdata.QuotedSymbol'
+          $ref: '#/definitions/marketdata.QuotedSymbol'
         type: array
     type: object
   RealizedEvent:
@@ -562,7 +577,9 @@ definitions:
       acquired_date:
         description: |-
           Lot detail, set only for a disposal. Nil on income, which has no lot
-          behind it - distinct from a cost basis that happens to be zero.
+          behind it - distinct from a cost basis that happens to be zero. Quantity
+          is in the shares as they were on EventDate, as a 1099-B reports them, not
+          split-adjusted to today.
         type: string
       amount:
         type: number
@@ -588,8 +605,6 @@ definitions:
         type: string
       id:
         type: string
-      lot_transaction_id:
-        type: string
       origin:
         type: string
       proceeds:
@@ -598,6 +613,8 @@ definitions:
         type: number
       symbol:
         type: string
+      tax_lot_id:
+        type: string
       term:
         description: '"short" | "long"; empty for income'
         type: string
@@ -605,8 +622,9 @@ definitions:
         description: |-
           Source links. Two real foreign keys rather than a polymorphic pair, so
           each stays a genuine reference the database can enforce. TransactionID is
-          the realizing sell and LotTransactionID the buy that supplied the shares;
-          DistributionID is the income record. Exactly one origin's ids are set.
+          the realizing trade and TaxLotID the TaxLot it drew from (whose own
+          TransactionID is the opening trade); DistributionID is the income record.
+          Exactly one origin's ids are set.
         type: string
       treatments:
         description: |-
@@ -637,6 +655,26 @@ definitions:
         type: integer
       open:
         type: integer
+    type: object
+  StockSplit:
+    properties:
+      created_at:
+        type: string
+      effective_date:
+        description: |-
+          EffectiveDate is the first day the shares trade split-adjusted (the
+          ex-date). A trade on this date is already in post-split shares.
+        type: string
+      holding_id:
+        type: string
+      id:
+        type: string
+      new_shares:
+        type: number
+      old_shares:
+        type: number
+      updated_at:
+        type: string
     type: object
   TaxBucket:
     properties:
@@ -681,6 +719,8 @@ definitions:
     properties:
       account_id:
         type: string
+      adjusted_price:
+        type: number
       asset_description:
         type: string
       asset_type:
@@ -715,13 +755,23 @@ definitions:
           price: an unpriced lot has an unknown value, not a value of zero, and
           reporting zero would show the whole basis as a loss.
         type: number
+      opening_transaction_id:
+        type: string
       purchase_date:
         type: string
       purchase_price:
         type: number
       purchase_quantity:
         type: number
+      quantity:
+        type: number
+      realized_gains:
+        description: RealizedGains is what has been realized from the closed part
+          of the lot.
+        type: number
       remaining_quantity:
+        type: number
+      split_factor:
         type: number
       symbol:
         type: string
@@ -901,7 +951,7 @@ definitions:
           the action alone can't say once options are involved: writing an option
           OPENS a position by selling, and buying it back CLOSES one.
 
-          Effect is "open" (creates a lot) or "close" (depletes lots); Direction is
+          Effect is "open" (opens a TaxLot) or "close" (depletes lots); Direction is
           "long" or "short", saying which side the lot sits on. A stock buy is an
           open/long and a stock sell a close/long, so the existing behaviour is just
           the ordinary case of the same rule. Empty on non-lot actions.
@@ -921,13 +971,6 @@ definitions:
       quantity:
         type: number
       realized_gains:
-        type: number
-      remaining_quantity:
-        description: |-
-          RemainingQuantity is set only on a stock buy, which doubles as a tax lot:
-          it's the shares of this purchase still open (quantity minus what later
-          sells have disposed). Nil for sells and other actions. Maintained as a
-          cache by the recompute; the Gain ledger is the source of truth.
         type: number
       settlement_date:
         type: string
@@ -1103,7 +1146,7 @@ definitions:
       updated_at:
         type: string
     type: object
-  github_com_eriksalino_wealthogic_api_internal_marketdata.BackfillResult:
+  marketdata.BackfillResult:
     properties:
       considered:
         type: integer
@@ -1121,7 +1164,7 @@ definitions:
       not_found:
         type: integer
     type: object
-  github_com_eriksalino_wealthogic_api_internal_marketdata.QuotedSymbol:
+  marketdata.QuotedSymbol:
     properties:
       as_of:
         type: string
@@ -1532,7 +1575,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/github_com_eriksalino_wealthogic_api_internal_marketdata.BackfillResult'
+            $ref: '#/definitions/marketdata.BackfillResult'
         "500":
           description: Internal Server Error
           schema:
@@ -1563,7 +1606,8 @@ paths:
             additionalProperties:
               type: string
             type: object
-      summary: Recompute every holding's aggregates from its ledger
+      summary: Rebuild every holding's tax lots, realized events and aggregates from
+        its ledger
       tags:
       - holdings
   /holdings/refresh-prices:
@@ -1590,6 +1634,107 @@ paths:
       summary: Re-quote every open stock holding's last price
       tags:
       - holdings
+  /splits:
+    get:
+      parameters:
+      - description: Holding ID
+        in: query
+        name: holding_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/StockSplit'
+            type: array
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: List a holding's stock splits, oldest first
+      tags:
+      - splits
+    post:
+      consumes:
+      - application/json
+      description: Every old_shares held before effective_date become new_shares (2-for-1
+        is 1 -> 2; a 1-for-8 reverse split is 8 -> 1). The holding's lots are rebuilt
+        around it; its transactions are left as traded.
+      parameters:
+      - description: Split payload
+        in: body
+        name: split
+        required: true
+        schema:
+          $ref: '#/definitions/CreateSplitRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/StockSplit'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Record a stock split
+      tags:
+      - splits
+  /splits/{id}:
+    delete:
+      description: Rebuilds the holding's lots without it. Rejected if post-split
+        sells would no longer be covered.
+      parameters:
+      - description: Split ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No Content
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Delete a stock split
+      tags:
+      - splits
   /tax-lots:
     get:
       parameters:
@@ -1630,8 +1775,7 @@ paths:
     post:
       consumes:
       - application/json
-      description: Records a stock buy against a holding. The buy transaction is the
-        tax lot.
+      description: Records a buy against a holding, which opens the tax lot.
       parameters:
       - description: Tax lot payload
         in: body
@@ -1665,10 +1809,11 @@ paths:
     patch:
       consumes:
       - application/json
-      description: Updates the buy transaction behind the lot and recomputes the holding.
-        Rejected if the lot has already been sold from.
+      description: Updates the buy transaction behind the lot, in its as-traded shares,
+        and rebuilds the holding's lots. Rejected if the lot has already been sold
+        from.
       parameters:
-      - description: Tax lot (buy transaction) ID
+      - description: Tax lot ID
         in: path
         name: id
         required: true
@@ -1986,8 +2131,8 @@ paths:
   /transactions/{id}:
     delete:
       description: Soft-deletes the transaction; if it belongs to a holding, the holding's
-        lots and aggregates are rebuilt from its remaining buys and sells. A buy's
-        own lot is not removed.
+        tax lots and aggregates are rebuilt from its remaining trades, which removes
+        the lot a deleted buy opened.
       parameters:
       - description: Transaction ID
         in: path
@@ -2024,8 +2169,8 @@ paths:
       consumes:
       - application/json
       description: Updates the transaction; if it belongs to a holding, the holding's
-        lots and aggregates are rebuilt from its buys and sells. A buy's own lot is
-        not changed.
+        tax lots and aggregates are rebuilt from its trades, including the lot this
+        transaction opened.
       parameters:
       - description: Transaction ID
         in: path

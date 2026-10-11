@@ -24,7 +24,7 @@ type Transaction struct {
 	// the action alone can't say once options are involved: writing an option
 	// OPENS a position by selling, and buying it back CLOSES one.
 	//
-	// Effect is "open" (creates a lot) or "close" (depletes lots); Direction is
+	// Effect is "open" (opens a TaxLot) or "close" (depletes lots); Direction is
 	// "long" or "short", saying which side the lot sits on. A stock buy is an
 	// open/long and a stock sell a close/long, so the existing behaviour is just
 	// the ordinary case of the same rule. Empty on non-lot actions.
@@ -41,12 +41,6 @@ type Transaction struct {
 	SettlementDate *time.Time `gorm:"type:date" json:"settlement_date"`
 
 	RealizedGains float64 `json:"realized_gains"`
-
-	// RemainingQuantity is set only on a stock buy, which doubles as a tax lot:
-	// it's the shares of this purchase still open (quantity minus what later
-	// sells have disposed). Nil for sells and other actions. Maintained as a
-	// cache by the recompute; the Gain ledger is the source of truth.
-	RemainingQuantity *float64 `json:"remaining_quantity"`
 
 	// HoldingID is nil until a matching Holding exists to link to - imported
 	// transactions and holdings come from separate Fidelity exports and may

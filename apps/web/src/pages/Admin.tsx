@@ -297,7 +297,7 @@ export default function Admin() {
         <UtilityCard
           icon="calculate"
           title="Recalculate Holdings"
-          description="Replays the position derivation over every holding from its transaction ledger — quantity, cost basis, gains and open/closed status. Use it after an import, or when a figure looks stale."
+          description="Replays every holding's transaction ledger from scratch — tax lots, splits, realized gains, quantity, cost basis and open/closed status. Use it after an import, or when a figure looks stale."
           action="Recalculate"
           pendingLabel="Recalculating…"
           mutation={recalc}

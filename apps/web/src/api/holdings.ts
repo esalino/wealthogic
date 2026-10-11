@@ -2,13 +2,22 @@ const API_BASE = import.meta.env.API_URL ?? 'http://localhost:8080'
 
 export interface TaxLot {
   id: string
+  // The trade that opened this lot: a buy, or a sell-to-open for a written
+  // option. The trades that closed it are the realized events with this tax_lot_id.
+  opening_transaction_id: string
   asset_type: string
   symbol: string
   asset_description: string
   purchase_date: string
+  // The trade as it happened, in the shares of its day - what editing edits.
   purchase_quantity: number
   purchase_price: number
+  // The lot in today's shares: a split since purchase resizes these, not the
+  // trade. split_factor is today's shares per traded share (1 when none).
+  quantity: number
   remaining_quantity: number
+  adjusted_price: number
+  split_factor: number
   holding_id: string | null
   account_id: string
   created_at: string
@@ -23,6 +32,8 @@ export interface TaxLot {
   last_price: number
   // The open part of the lot at its opening price, fees included.
   cost_basis: number
+  // Gain realized so far from the closed part of the lot.
+  realized_gains: number
   // Null when the holding has no price - an unpriced lot is unknown, not zero.
   market_value: number | null
   gain_unrealized_amount: number | null

@@ -206,7 +206,7 @@ type parsedRow struct {
 // fidelityTransactionsHandler parses a Fidelity account history CSV. For each
 // row it creates a Transaction (with a mapped action) plus, as a record of the
 // import, an UploadTransaction (with the raw action) linked back to it; all of
-// them tie to an Upload row logging the file. A stock buy also opens a tax lot.
+// them tie to an Upload row logging the file. An opening trade also opens a tax lot.
 //
 // Fidelity lists rows newest-first, so rows are buffered and inserted in reverse
 // to keep insertion (and thus PK) order chronological.
@@ -443,9 +443,9 @@ func (h *fidelityTransactionsHandler) Process(db *gorm.DB, file io.Reader, opts 
 				continue
 			}
 
-			// An opening trade IS a tax lot (seed its remaining quantity); a
-			// closing trade depletes open lots on the same side (FIFO/LIFO per
-			// the account) and realizes gains. Non-lot actions do neither.
+			// An opening trade opens a tax lot; a closing trade depletes open
+			// lots on the same side (FIFO/LIFO per the account) and realizes
+			// gains. Non-lot actions do neither.
 			//
 			// A close needs no price: an expiration has none, and closing at
 			// zero is exactly what expiring means.
@@ -494,14 +494,6 @@ func (h *fidelityTransactionsHandler) Process(db *gorm.DB, file io.Reader, opts 
 				}
 
 				txn.HoldingID = &holding.ID
-				// Fidelity signs quantity by trade direction, so writing an
-				// option arrives negative; the lot's size is its magnitude and
-				// Direction carries the side.
-				q := *txn.Quantity
-				if q < 0 {
-					q = -q
-				}
-				txn.RemainingQuantity = &q
 				affected[holding.ID] = true
 			}
 
@@ -524,6 +516,13 @@ func (h *fidelityTransactionsHandler) Process(db *gorm.DB, file io.Reader, opts 
 				return fmt.Errorf("failed to create transaction for %s on %s: %w", txn.Symbol, txn.Date.Format(fidelityDateLayout), err)
 			}
 			result.Created++
+
+			// Open the lot now that the transaction it points at exists.
+			if isOpen {
+				if err := portfolio.OpenLot(tx, txn); err != nil {
+					return fmt.Errorf("failed to open lot for %s: %w", txn.Symbol, err)
+				}
+			}
 
 			// Deplete lots now that the transaction exists (realized events link
 			// to it). Imports are lenient: an unfillable close realizes only

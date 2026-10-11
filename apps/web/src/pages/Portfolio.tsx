@@ -13,6 +13,7 @@ import {
   type TaxLot as ApiTaxLot,
 } from '../api/holdings'
 import { createTaxLot, getTaxLots, updateTaxLot } from '../api/taxLots'
+import { createSplit, deleteSplit, getSplits, splitLabel } from '../api/splits'
 import { getAllocation, type AllocationSlice } from '../api/holdings'
 import { formatDate } from '../lib/datetime'
 import { createTransaction, deleteTransaction, getTransactions, updateTransaction, type Transaction as ApiTransaction } from '../api/transactions'
@@ -346,6 +347,12 @@ function SubPanel({ holding, activeTab, onTabChange, onAddLot, onEditLot, onAddT
         </button>
       </div>
 
+      {/* A split resizes lots, so it's recorded where lots are read. Only
+          shares split - an option contract or a bill doesn't. */}
+      {activeTab === 'Tax Lots' && holding.assetType !== 'Option' && holding.assetType !== 'Treasury' && (
+        <SplitsStrip holdingId={holding.id} />
+      )}
+
       {/* Tab content */}
       <div className="overflow-hidden rounded-lg border border-outline-variant">
         <table className="w-full text-left border-collapse">
@@ -377,6 +384,9 @@ function SubPanel({ holding, activeTab, onTabChange, onAddLot, onEditLot, onAddT
                 {!lotsLoading && lots.map((lot) => {
                   const closed = lot.remaining_quantity <= 0
                   const short = lot.direction === 'short'
+                  // Lots are sized in today's shares; flag the ones a split
+                  // has resized so the price isn't mistaken for the fill.
+                  const split = Math.abs(lot.split_factor - 1) > 1e-9
                   // Unpriced lots report null rather than zero, so show that
                   // they're unknown instead of implying a total loss.
                   const unrealized = lot.gain_unrealized_amount
@@ -386,13 +396,20 @@ function SubPanel({ holding, activeTab, onTabChange, onAddLot, onEditLot, onAddT
                   return (
                     <tr key={lot.id} className={`text-data-tabular text-on-surface tabular-nums ${closed ? 'opacity-50' : ''}`}>
                       <td className="px-4 py-3">{formatDate(lot.purchase_date)}</td>
-                      <td className="px-4 py-3 text-right">{fmtNumber(lot.purchase_quantity)}</td>
+                      <td className="px-4 py-3 text-right">{fmtNumber(lot.quantity)}</td>
                       <td className="px-4 py-3 text-right">
                         {fmtNumber(lot.remaining_quantity)}
                         {short && <span className="ml-2 text-[10px] font-bold text-on-surface-variant uppercase">Short</span>}
                         {closed && <span className="ml-2 text-[10px] font-bold text-on-surface-variant uppercase">Closed</span>}
                       </td>
-                      <td className="px-4 py-3 text-right">{fmtCurrency(lot.purchase_price)}</td>
+                      <td className="px-4 py-3 text-right">
+                        {split ? (
+                          <span title={`Split-adjusted. Bought ${fmtNumber(lot.purchase_quantity)} @ ${fmtCurrency(lot.purchase_price)}`}>
+                            {fmtCurrency(lot.adjusted_price)}
+                            <span className="ml-2 text-[10px] font-bold text-on-surface-variant uppercase">Split</span>
+                          </span>
+                        ) : fmtCurrency(lot.purchase_price)}
+                      </td>
                       <td className="px-4 py-3 text-right">{fmtCurrency(lot.cost_basis)}</td>
                       <td className="px-4 py-3 text-right">
                         {lot.market_value == null
@@ -1195,6 +1212,114 @@ function AddTaxLotModal({ holding, onClose }: { holding: { id: string; symbol: s
 
 // ── Edit tax lot modal ────────────────────────────────────────────────────────
 
+// SplitsStrip lists a holding's splits and records new ones. Any change
+// rebuilds the holding's lots and realized gains, so everything derived from
+// them is refetched.
+function SplitsStrip({ holdingId }: { holdingId: string }) {
+  const queryClient = useQueryClient()
+  const { data: splits = [] } = useQuery({
+    queryKey: ['splits', holdingId],
+    queryFn: () => getSplits(holdingId),
+  })
+
+  const [adding, setAdding] = useState(false)
+  const [date, setDate] = useState('')
+  const [oldShares, setOldShares] = useState('')
+  const [newShares, setNewShares] = useState('')
+
+  const invalidate = () => {
+    for (const key of ['splits', 'tax-lots', 'holdings', 'transactions', 'tax']) {
+      queryClient.invalidateQueries({ queryKey: [key] })
+    }
+  }
+  const create = useMutation({
+    mutationFn: createSplit,
+    onSuccess: () => {
+      invalidate()
+      setAdding(false)
+      setDate('')
+      setOldShares('')
+      setNewShares('')
+    },
+  })
+  const remove = useMutation({ mutationFn: deleteSplit, onSuccess: invalidate })
+
+  const oldN = parseFloat(oldShares)
+  const newN = parseFloat(newShares)
+  const canSubmit = date !== '' && oldN > 0 && newN > 0 && oldN !== newN
+  const error = (create.error ?? remove.error) as Error | null
+
+  if (splits.length === 0 && !adding) {
+    return (
+      <div className="flex justify-end">
+        <button onClick={() => setAdding(true)} className="flex items-center gap-1 text-label-sm font-semibold text-secondary hover:opacity-80 transition-opacity">
+          <span className="material-symbols-outlined text-base">call_split</span>
+          Record Split
+        </button>
+      </div>
+    )
+  }
+
+  return (
+    <div className="rounded-lg border border-outline-variant bg-surface-container-low px-4 py-3 space-y-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-[10px] text-label-caps text-on-surface-variant uppercase mr-2">Splits</span>
+        {splits.map((s) => (
+          <span key={s.id} className="inline-flex items-center gap-1 rounded-full border border-outline-variant bg-surface-container-lowest px-3 py-1 text-label-sm text-on-surface tabular-nums">
+            {splitLabel(s)} on {formatDate(s.effective_date)}
+            <button
+              onClick={() => { if (window.confirm(`Delete the ${splitLabel(s)} split? Lots will be rebuilt without it.`)) remove.mutate(s.id) }}
+              disabled={remove.isPending}
+              className="ml-1 text-on-surface-variant hover:text-error disabled:opacity-50"
+              aria-label="Delete split"
+            >
+              <span className="material-symbols-outlined text-sm leading-none">close</span>
+            </button>
+          </span>
+        ))}
+        {!adding && (
+          <button onClick={() => setAdding(true)} className="ml-auto flex items-center gap-1 text-label-sm font-semibold text-secondary hover:opacity-80 transition-opacity">
+            <span className="material-symbols-outlined text-base">add</span>
+            Record Split
+          </button>
+        )}
+      </div>
+
+      {adding && (
+        <div className="flex flex-wrap items-end gap-3">
+          <div>
+            <label className="block text-label-sm font-semibold text-on-surface mb-1.5">Effective (ex-) date</label>
+            <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className={modalInputCls} />
+          </div>
+          <div className="w-28">
+            <label className="block text-label-sm font-semibold text-on-surface mb-1.5">New shares</label>
+            <input type="number" value={newShares} onChange={(e) => setNewShares(e.target.value)} placeholder="1" className={modalNumInputCls} />
+          </div>
+          <span className="pb-3 text-label-sm text-on-surface-variant">for every</span>
+          <div className="w-28">
+            <label className="block text-label-sm font-semibold text-on-surface mb-1.5">Old shares</label>
+            <input type="number" value={oldShares} onChange={(e) => setOldShares(e.target.value)} placeholder="8" className={modalNumInputCls} />
+          </div>
+          <div className="flex gap-2 pb-0.5">
+            <button onClick={() => { setAdding(false); create.reset() }} disabled={create.isPending} className="px-4 py-2.5 border border-outline-variant rounded-lg text-body-md text-on-surface hover:bg-surface-container-high transition-colors disabled:opacity-50">
+              Cancel
+            </button>
+            <button
+              onClick={() => create.mutate({ holding_id: holdingId, effective_date: date, old_shares: oldN, new_shares: newN })}
+              disabled={create.isPending || !canSubmit}
+              className="px-4 py-2.5 bg-primary text-on-primary rounded-lg text-body-md font-semibold hover:opacity-90 transition-opacity disabled:opacity-50"
+            >
+              {create.isPending ? 'Saving…' : 'Save Split'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {error && <p className="text-body-sm text-error">{error.message}</p>}
+    </div>
+  )
+}
+
 function EditTaxLotModal({ lot, onClose }: { lot: ApiTaxLot | null; onClose: () => void }) {
   const queryClient = useQueryClient()
   const { data: accountsData } = useQuery({
@@ -1251,6 +1376,11 @@ function EditTaxLotModal({ lot, onClose }: { lot: ApiTaxLot | null; onClose: () 
           <div>
             <h2 className="text-headline-sm text-on-surface">Edit Tax Lot</h2>
             <p className="text-label-sm text-on-surface-variant">{lot.symbol}</p>
+            {Math.abs(lot.split_factor - 1) > 1e-9 && (
+              <p className="mt-1 text-label-sm text-on-surface-variant">
+                Enter the buy as it was traded, before any split. The lot is resized from it.
+              </p>
+            )}
           </div>
           <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-lg text-on-surface-variant hover:bg-surface-container-high transition-colors">
             <span className="material-symbols-outlined text-xl">close</span>

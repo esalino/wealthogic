@@ -382,7 +382,7 @@ type recalculateResult struct {
 } // @name RecalculateResult
 
 // Recalculate godoc
-// @Summary      Recompute every holding's aggregates from its ledger
+// @Summary      Rebuild every holding's tax lots, realized events and aggregates from its ledger
 // @Tags         holdings
 // @Produce      json
 // @Success      200  {object}  recalculateResult
@@ -391,8 +391,10 @@ type recalculateResult struct {
 //
 // An import recomputes only the holdings it touched, so holdings that were last
 // written before a derivation changed keep their old figures - a position sold
-// to zero before status was derived still reads Open. This replays the
-// derivation over the whole book.
+// to zero before status was derived still reads Open. This replays the whole
+// lot ledger over the whole book: lots, disposals and their tax treatments, then
+// the aggregates. Lenient, like an import - a close with too few shares behind
+// it realizes what it can rather than failing the sweep.
 func (h *holdingHandler) Recalculate(c *gin.Context) {
 	run := adminlog.Start(adminlog.UtilityRecalculateHoldings)
 
@@ -408,12 +410,19 @@ func (h *holdingHandler) Recalculate(c *gin.Context) {
 	// whole sweep, and each recompute is already self-contained.
 	for i := range holdings {
 		if err := h.db.Transaction(func(tx *gorm.DB) error {
-			return portfolio.RecalcHolding(tx, &holdings[i])
+			return portfolio.RebuildHolding(tx, holdings[i].ID, false)
 		}); err != nil {
 			run.Finish(h.db, []string{fmt.Sprintf("%s: %v", holdings[i].Symbol, err)})
 			c.JSON(http.StatusInternalServerError, gin.H{
 				"error": fmt.Sprintf("failed to recompute holding %s", holdings[i].Symbol),
 			})
+			return
+		}
+		// The rebuild saved the holding through its own copy, so reload for
+		// the status it derived.
+		if err := h.db.First(&holdings[i], "id = ?", holdings[i].ID).Error; err != nil {
+			run.Finish(h.db, []string{fmt.Sprintf("%s: %v", holdings[i].Symbol, err)})
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to reload holdings"})
 			return
 		}
 		if holdings[i].Status == models.HoldingStatusClosed {

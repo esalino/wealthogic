@@ -49,14 +49,17 @@ type RealizedEvent struct {
 
 	// Source links. Two real foreign keys rather than a polymorphic pair, so
 	// each stays a genuine reference the database can enforce. TransactionID is
-	// the realizing sell and LotTransactionID the buy that supplied the shares;
-	// DistributionID is the income record. Exactly one origin's ids are set.
-	TransactionID    *uuid.UUID `gorm:"type:uuid;index" json:"transaction_id"`
-	LotTransactionID *uuid.UUID `gorm:"type:uuid;index" json:"lot_transaction_id"`
-	DistributionID   *uuid.UUID `gorm:"type:uuid;index" json:"distribution_id"`
+	// the realizing trade and TaxLotID the TaxLot it drew from (whose own
+	// TransactionID is the opening trade); DistributionID is the income record.
+	// Exactly one origin's ids are set.
+	TransactionID  *uuid.UUID `gorm:"type:uuid;index" json:"transaction_id"`
+	TaxLotID       *uuid.UUID `gorm:"type:uuid;index" json:"tax_lot_id"`
+	DistributionID *uuid.UUID `gorm:"type:uuid;index" json:"distribution_id"`
 
 	// Lot detail, set only for a disposal. Nil on income, which has no lot
-	// behind it - distinct from a cost basis that happens to be zero.
+	// behind it - distinct from a cost basis that happens to be zero. Quantity
+	// is in the shares as they were on EventDate, as a 1099-B reports them, not
+	// split-adjusted to today.
 	AcquiredDate *time.Time `gorm:"type:date" json:"acquired_date"`
 	Quantity     *float64   `json:"quantity"`
 	CostBasis    *float64   `json:"cost_basis"`
