@@ -2615,6 +2615,13 @@ const docTemplate = `{
                 "balance": {
                     "type": "number"
                 },
+                "cash_balance": {
+                    "description": "CashBalance is the account's uninvested cash (core money market and\npending activity), as the broker last reported it. Positions are derived\nfrom tax lots, but cash never forms a lot, so it can only come from an\nimport. CashBalanceAsOf is the date the broker's figure describes; nil\nmeans no import has reported cash, and an account with neither cash nor\nlots keeps a hand-entered Balance (see portfolio.RecalcAccountBalance).",
+                    "type": "number"
+                },
+                "cash_balance_as_of": {
+                    "type": "string"
+                },
                 "created_at": {
                     "type": "string"
                 },

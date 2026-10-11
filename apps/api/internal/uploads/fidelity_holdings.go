@@ -9,14 +9,17 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/eriksalino/wealthogic/api/internal/models"
 	"github.com/eriksalino/wealthogic/api/internal/portfolio"
+	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
 
 // Column indices in a Fidelity "Portfolio Positions" export.
 const (
+	fidColAccount      = 0
 	fidColSymbol       = 2
 	fidColDescription  = 3
 	fidColQuantity     = 4
@@ -30,6 +33,14 @@ const (
 // (as in transaction rows, e.g. "PUT (MAR) MARRIOTT...") or trails it (as in
 // holding rows, e.g. "MAR JUL 17 2026 $320 PUT").
 var optionWordRegex = regexp.MustCompile(`\b(PUT|CALL)\b`)
+
+// downloadedRegex finds the snapshot date in the export's footer line, e.g.
+// "Date downloaded Oct-03-2026 5:14 p.m ET".
+var downloadedRegex = regexp.MustCompile(`Date downloaded ([A-Za-z]{3}-\d{2}-\d{4})`)
+
+// pendingActivitySymbol is the row Fidelity adds for cash movements that
+// haven't settled. It has a value but no description and no security behind it.
+const pendingActivitySymbol = "PENDING ACTIVITY"
 
 const (
 	defaultAssetType = "Stock"
@@ -70,6 +81,13 @@ func (h *fidelityHoldingsHandler) Process(db *gorm.DB, file io.Reader, opts Opti
 	// Description columns), so require this file's own header before trusting a
 	// single row of it.
 	var sawHeader bool
+
+	// The account's cash: its core money market plus pending activity. The
+	// file is a snapshot of the day it was downloaded, which its footer says;
+	// without one, the upload itself is the best guess at when.
+	var cash float64
+	asOf := time.Now()
+	accountNumbers := map[string]bool{}
 	for {
 		record, err := reader.Read()
 		if errors.Is(err, io.EOF) {
@@ -88,9 +106,27 @@ func (h *fidelityHoldingsHandler) Process(db *gorm.DB, file io.Reader, opts Opti
 			continue
 		}
 
+		// Both are shorter than a position row, so they're picked out before
+		// the length check below throws them away.
+		if d, ok := downloadedDate(record); ok {
+			asOf = d
+			result.Skipped++
+			continue
+		}
+		if value, ok := pendingActivity(record); ok {
+			accountNumbers[strings.TrimSpace(record[fidColAccount])] = true
+			cash += value
+			result.Skipped++
+			continue
+		}
+
 		if len(record) < fidMinColumns {
 			result.Skipped++
 			continue
+		}
+
+		if acct := strings.TrimSpace(record[fidColAccount]); acct != "" {
+			accountNumbers[acct] = true
 		}
 
 		symbol := strings.TrimSuffix(strings.TrimSpace(record[fidColSymbol]), "**")
@@ -125,6 +161,7 @@ func (h *fidelityHoldingsHandler) Process(db *gorm.DB, file io.Reader, opts Opti
 		currentValue := 0.0
 		if valueOnly {
 			currentValue = parseDollar(record[fidColCurrentValue])
+			cash += currentValue
 		}
 
 		var holding models.Holding
@@ -180,6 +217,21 @@ func (h *fidelityHoldingsHandler) Process(db *gorm.DB, file io.Reader, opts Opti
 		return nil, wrongFileError("holdings")
 	}
 
+	// Cash is the account's own, so it's recorded only when the file is
+	// attributable to one: uploaded against an account, and covering a single
+	// one. An all-accounts export would otherwise pool every account's cash
+	// into whichever one it was uploaded to.
+	if opts.AccountID != uuid.Nil && len(accountNumbers) == 1 {
+		if err := portfolio.SetAccountCash(db, opts.AccountID, cash, asOf); err != nil {
+			return nil, fmt.Errorf("failed to record cash balance: %w", err)
+		}
+	}
+	// Holdings are shared, so the new prices move every account that holds
+	// one of these symbols - not just the one the file was uploaded to.
+	if err := portfolio.RecalcAllAccountBalances(db); err != nil {
+		return nil, fmt.Errorf("failed to recompute account balances: %w", err)
+	}
+
 	// Log the file now that it's been recognized and read. A positions export
 	// produces no UploadTransaction rows, so this Upload row is the only record
 	// that the import happened - without it the file leaves no trace in history.
@@ -190,6 +242,32 @@ func (h *fidelityHoldingsHandler) Process(db *gorm.DB, file io.Reader, opts Opti
 		return nil, err
 	}
 	return result, nil
+}
+
+// downloadedDate reads the snapshot date from the export's footer line.
+func downloadedDate(record []string) (time.Time, bool) {
+	m := downloadedRegex.FindStringSubmatch(strings.Join(record, ","))
+	if m == nil {
+		return time.Time{}, false
+	}
+	d, err := time.Parse("Jan-02-2006", m[1])
+	if err != nil {
+		return time.Time{}, false
+	}
+	return d, true
+}
+
+// pendingActivity reports the value of a "Pending activity" row: cash already
+// committed to a trade that hasn't settled. A buy shows up as a position at
+// once while the money market still holds the cash, so this (negative) row is
+// what keeps the purchase from being counted twice. The row stops short after
+// its value, well under a position row's width.
+func pendingActivity(record []string) (float64, bool) {
+	if len(record) <= fidColCurrentValue ||
+		!strings.EqualFold(strings.TrimSpace(record[fidColSymbol]), pendingActivitySymbol) {
+		return 0, false
+	}
+	return parseDollar(record[fidColCurrentValue]), true
 }
 
 // parseDollar converts values like "$99.90" or "+$0.041" to a float,

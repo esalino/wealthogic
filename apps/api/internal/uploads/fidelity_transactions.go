@@ -33,6 +33,7 @@ const (
 	txnHeaderFees           = "fees"
 	txnHeaderAmount         = "amount"
 	txnHeaderSettlementDate = "settlement date"
+	txnHeaderCashBalance    = "cash balance"
 )
 
 // txnColumns is where one export keeps each column an import reads. An
@@ -48,6 +49,7 @@ type txnColumns struct {
 	fees           int
 	amount         int
 	settlementDate int
+	cashBalance    int
 
 	// lastRequired is the rightmost column a row must reach to be a
 	// transaction at all, which is how the export's trailing disclaimer - real
@@ -92,6 +94,7 @@ func resolveTxnColumns(record []string) (*txnColumns, error) {
 		commission:     optionalColumn(cols, txnHeaderCommission),
 		fees:           optionalColumn(cols, txnHeaderFees),
 		settlementDate: optionalColumn(cols, txnHeaderSettlementDate),
+		cashBalance:    optionalColumn(cols, txnHeaderCashBalance),
 	}
 	for _, i := range []int{c.runDate, c.action, c.symbol, c.description, c.quantity, c.amount} {
 		if i > c.lastRequired {
@@ -231,6 +234,10 @@ func (h *fidelityTransactionsHandler) Process(db *gorm.DB, file io.Reader, opts 
 	result := &Result{}
 	var rows []parsedRow
 	var minDate, maxDate time.Time
+	// The account's cash after the newest row in the file. Fidelity lists rows
+	// newest-first, so within a day the first row seen is the latest.
+	var cash *float64
+	var cashDate time.Time
 	// A positions export parses as transactions without error, so require this
 	// file's own header before trusting a single row of it. The header is also
 	// what says where each column is.
@@ -281,6 +288,11 @@ func (h *fidelityTransactionsHandler) Process(db *gorm.DB, file io.Reader, opts 
 		}
 		if maxDate.IsZero() || date.After(maxDate) {
 			maxDate = date
+		}
+		// A row still processing carries no balance; the next one that does
+		// is the latest settled figure.
+		if bal := parseDollarPtr(field(record, cols.cashBalance)); bal != nil && (cash == nil || date.After(cashDate)) {
+			cash, cashDate = bal, date
 		}
 
 		symbol := strings.TrimSuffix(field(record, cols.symbol), "**")
@@ -571,6 +583,15 @@ func (h *fidelityTransactionsHandler) Process(db *gorm.DB, file io.Reader, opts 
 			if err := portfolio.RecalcHolding(tx, &holding); err != nil {
 				return fmt.Errorf("failed to recompute holding %s: %w", holding.Symbol, err)
 			}
+		}
+
+		if cash != nil {
+			if err := portfolio.SetAccountCash(tx, opts.AccountID, *cash, cashDate); err != nil {
+				return fmt.Errorf("failed to record cash balance: %w", err)
+			}
+		}
+		if err := portfolio.RecalcAccountBalance(tx, opts.AccountID); err != nil {
+			return fmt.Errorf("failed to recompute account balance: %w", err)
 		}
 		return nil
 	})

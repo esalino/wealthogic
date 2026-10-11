@@ -16,6 +16,10 @@ export interface Account {
   tax_type: string
   default_cost_basis: string
   balance: number
+  // Uninvested cash as the broker last reported it, and the date it describes.
+  // Null as-of means no import has reported cash for the account.
+  cash_balance: number
+  cash_balance_as_of: string | null
   created_at: string
   updated_at: string
   owners?: { id: string; first_name: string; last_name: string }[]

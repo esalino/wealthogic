@@ -232,6 +232,7 @@ export default function Admin() {
   // because the run that just finished is now the latest one.
   const onRunFinished = () => {
     queryClient.invalidateQueries({ queryKey: ['holdings'] })
+    queryClient.invalidateQueries({ queryKey: ['accounts'] })
     queryClient.invalidateQueries({ queryKey: ['admin', 'logs'] })
   }
 

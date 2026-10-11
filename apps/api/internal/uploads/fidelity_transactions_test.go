@@ -120,7 +120,7 @@ func TestResolveTxnColumns(t *testing.T) {
 			want: txnColumns{
 				runDate: 0, action: 1, symbol: 2, description: 3,
 				price: 8, quantity: 9, commission: 11, fees: 12,
-				amount: 14, settlementDate: 16, lastRequired: 14,
+				amount: 14, settlementDate: 16, cashBalance: 15, lastRequired: 14,
 			},
 		},
 		{
@@ -129,7 +129,7 @@ func TestResolveTxnColumns(t *testing.T) {
 			want: txnColumns{
 				runDate: 0, action: 1, symbol: 2, description: 3,
 				price: 5, quantity: 6, commission: 7, fees: 8,
-				amount: 10, settlementDate: 12, lastRequired: 10,
+				amount: 10, settlementDate: 12, cashBalance: 11, lastRequired: 10,
 			},
 		},
 	}

@@ -369,6 +369,13 @@ func (h *holdingHandler) RefreshPrices(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to refresh prices"})
 		return
 	}
+	// Account balances are valued at each holding's last price, so they're
+	// stale the moment a price moves.
+	if err := portfolio.RecalcAllAccountBalances(h.db); err != nil {
+		run.Finish(h.db, append(result.Errors(), err.Error()))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to recompute account balances"})
+		return
+	}
 	run.Finish(h.db, result.Errors())
 
 	c.JSON(http.StatusOK, result)
@@ -430,6 +437,11 @@ func (h *holdingHandler) Recalculate(c *gin.Context) {
 			continue
 		}
 		result.Open++
+	}
+	if err := portfolio.RecalcAllAccountBalances(h.db); err != nil {
+		run.Finish(h.db, []string{err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to recompute account balances"})
+		return
 	}
 	run.Finish(h.db, nil)
 

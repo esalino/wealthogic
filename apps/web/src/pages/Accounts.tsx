@@ -442,7 +442,8 @@ function UploadAccountModal({ account, onClose }: { account: Account | null; onC
     mutationFn: uploadFile,
     onSuccess: () => {
       // An import creates an upload + upload transactions, and can create
-      // holdings, transactions and tax lots.
+      // holdings, transactions and tax lots - and it moves account balances.
+      queryClient.invalidateQueries({ queryKey: ['accounts'] })
       queryClient.invalidateQueries({ queryKey: ['holdings'] })
       queryClient.invalidateQueries({ queryKey: ['transactions'] })
       queryClient.invalidateQueries({ queryKey: ['tax-lots'] })

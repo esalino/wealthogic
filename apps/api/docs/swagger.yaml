@@ -8,6 +8,17 @@ definitions:
         type: string
       balance:
         type: number
+      cash_balance:
+        description: |-
+          CashBalance is the account's uninvested cash (core money market and
+          pending activity), as the broker last reported it. Positions are derived
+          from tax lots, but cash never forms a lot, so it can only come from an
+          import. CashBalanceAsOf is the date the broker's figure describes; nil
+          means no import has reported cash, and an account with neither cash nor
+          lots keeps a hand-entered Balance (see portfolio.RecalcAccountBalance).
+        type: number
+      cash_balance_as_of:
+        type: string
       created_at:
         type: string
       default_cost_basis:
