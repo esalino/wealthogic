@@ -666,15 +666,16 @@ function doughnutGradient(slices: AllocationSlice[]): string {
   return `conic-gradient(${stops.join(', ')})`
 }
 
-const ASSET_TYPES = ['Stock', 'ETF', 'Mutual Fund', 'Bond', 'Money Market', 'Crypto', 'Other']
+const ASSET_TYPES = ['Stock', 'ETF', 'Mutual Fund', 'Bond', 'Money Market', 'Savings', 'Crypto', 'Other']
 
 // Asset types whose worth is a balance rather than a share count at a price. A
 // money-market fund holds a stable $1 NAV, so quantity * price is a roundabout
 // way to state a number the statement already gives you - and leaving the price
 // blank silently values the whole position at zero. The holdings importer draws
 // the same line (its "value-only" rows) and takes the value straight from the
-// broker, so the manual form has to be able to say the same thing.
-const VALUE_ONLY_ASSET_TYPES = new Set(['Money Market'])
+// broker, so the manual form has to be able to say the same thing. A bank
+// savings account is the same shape with no shares at all - just a balance.
+const VALUE_ONLY_ASSET_TYPES = new Set(['Money Market', 'Savings'])
 
 function isValueOnly(assetType: string): boolean {
   return VALUE_ONLY_ASSET_TYPES.has(assetType)
@@ -869,8 +870,10 @@ function HoldingFormFields({
             />
           </div>
           <p className="mt-1 text-label-sm text-on-surface-variant">
-            The balance itself. A {fields.assetType.toLowerCase()} holds a stable $1 value per
-            share, so there's no share count or price to derive it from — and no unrealized gain.
+            {fields.assetType === 'Savings'
+              ? "The account balance. A savings account has no shares or price, and no unrealized gain."
+              : `The balance itself. A ${fields.assetType.toLowerCase()} holds a stable $1 value per
+            share, so there's no share count or price to derive it from — and no unrealized gain.`}{' '}
             Interest it pays belongs in Dividend Income.
           </p>
         </div>

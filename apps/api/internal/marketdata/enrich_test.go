@@ -53,6 +53,7 @@ func TestWantsProfile(t *testing.T) {
 		{"and a money-market fund", models.Holding{AssetType: models.AssetTypeMoneyMarket, Symbol: "FZFXX"}, true},
 		{"a treasury is not a company", models.Holding{AssetType: models.AssetTypeTreasury, Symbol: "912797RS8"}, false},
 		{"an option is a contract", models.Holding{AssetType: models.AssetTypeOption, Symbol: "-AXP251121C390"}, false},
+		{"a savings account is a bank balance", models.Holding{AssetType: models.AssetTypeSavings, Symbol: "ALLY"}, false},
 		{
 			// Even mis-typed, the symbol itself gives it away.
 			name:    "an option symbol is caught whatever the asset type says",

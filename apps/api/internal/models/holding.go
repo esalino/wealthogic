@@ -24,6 +24,9 @@ const (
 	AssetTypeMutualFund  = "Mutual Fund"
 	AssetTypeBond        = "Bond"
 	AssetTypeOption      = "Option"
+	// AssetTypeSavings is a bank savings account: a balance that earns
+	// interest, with no shares or price behind it.
+	AssetTypeSavings = "Savings"
 )
 
 // defaultTaxClass is the tax class implied by an asset type alone. It mirrors
@@ -40,6 +43,8 @@ func defaultTaxClass(assetType string) string {
 	case AssetTypeBond:
 		return TaxClassCorporateBond
 	}
+	// Savings lands here too: bank interest is ordinary income everywhere,
+	// which is what the catch-all interest rules already say.
 	return TaxClassOther
 }
 
@@ -175,13 +180,15 @@ func (h Holding) ResolveIssuerJurisdiction() string {
 // this holding.
 //
 // Only securities with an issuer behind them have a profile: an option is a
-// contract rather than a company, and a treasury is government debt identified
-// by CUSIP. Asking anyway costs a rate-limited call to be told nothing.
+// contract rather than a company, a treasury is government debt identified
+// by CUSIP, and a savings account is a bank balance whose "symbol" is at most
+// a nickname. Asking anyway costs a rate-limited call to be told nothing.
 func (h Holding) WantsProfile() bool {
 	if h.Symbol == "" || h.ProfileFetchedAt != nil {
 		return false
 	}
-	if h.AssetType == AssetTypeOption || h.AssetType == AssetTypeTreasury {
+	switch h.AssetType {
+	case AssetTypeOption, AssetTypeTreasury, AssetTypeSavings:
 		return false
 	}
 	if _, isOption := ParseOptionSymbol(h.Symbol); isOption {
